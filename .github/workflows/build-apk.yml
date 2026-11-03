@@ -43,19 +43,21 @@ jobs:
           cd $GITHUB_WORKSPACE
           rm -rf android
           cp -r /tmp/clean_flutter/basket_app/android ./android
-          echo "Carpeta android limpia generada."
+          echo "Carpeta android limpia y oficial generada."
 
-          # Forzar versiones mínimas de Android SDK para compatibilidad total
-          echo "flutter.minSdkVersion=23" >> android/local.properties
-          echo "flutter.targetSdkVersion=34" >> android/local.properties
-          echo "flutter.compileSdkVersion=34" >> android/local.properties
+          # Forzar minSdk = 23 en la configuracion de Android
+          if [ -f "android/app/build.gradle.kts" ]; then
+            sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/g' android/app/build.gradle.kts
+            sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 23/g' android/app/build.gradle.kts
+          fi
+          if [ -f "android/app/build.gradle" ]; then
+            sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/g' android/app/build.gradle
+          fi
 
           # Configurar memoria y compatibilidad en gradle.properties
-          cat << 'EOF' > android/gradle.properties
-          org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m
-          android.useAndroidX=true
-          android.enableJetifier=true
-          EOF
+          echo "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m" > android/gradle.properties
+          echo "android.useAndroidX=true" >> android/gradle.properties
+          echo "android.enableJetifier=true" >> android/gradle.properties
 
       - name: Descargar dependencias
         run: |
