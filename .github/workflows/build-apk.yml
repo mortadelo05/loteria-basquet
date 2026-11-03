@@ -19,10 +19,11 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Instalar Flutter SDK
+      - name: Instalar Flutter SDK Estable (3.27.4)
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          flutter-version: '3.27.4'
           cache: true
 
       - name: Auto-reparar estructura Android si falta
@@ -35,7 +36,7 @@ jobs:
           fi
 
           if [ ! -d "android" ]; then
-            echo "Generando carpeta android oficial en entorno aislado..."
+            echo "Generando carpeta android oficial..."
             mkdir -p /tmp/clean_flutter
             cd /tmp/clean_flutter
             flutter create basket_app --platforms=android --org com.clubbasket.loteria
@@ -44,27 +45,32 @@ jobs:
             echo "Carpeta android generada e integrada correctamente."
           fi
 
+          # Asignar 4GB de memoria para evitar que el compilador se quede sin RAM
+          mkdir -p android
+          echo "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m" >> android/gradle.properties
+
+          # Configurar minSdkVersion 21 y modo release directo
           if [ -f "android/app/build.gradle" ]; then
             sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' android/app/build.gradle || true
             sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/g' android/app/build.gradle || true
             sed -i 's/signingConfig = signingConfigs.release/signingConfig = signingConfigs.debug/g' android/app/build.gradle || true
             echo "android.defaultConfig.multiDexEnabled = true" >> android/app/build.gradle
-            echo "android.lintOptions.abortOnError = false" >> android/app/build.gradle
-            echo "android.lintOptions.checkReleaseBuilds = false" >> android/app/build.gradle
           fi
-
           if [ -f "android/app/build.gradle.kts" ]; then
             sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/g' android/app/build.gradle.kts || true
             echo "android.defaultConfig.multiDexEnabled = true" >> android/app/build.gradle.kts
-            echo "android.lint.abortOnError = false" >> android/app/build.gradle.kts
-            echo "android.lint.checkReleaseBuilds = false" >> android/app/build.gradle.kts
           fi
 
-      - name: Descargar dependencias
-        run: flutter pub get
+      - name: Limpiar y descargar dependencias
+        run: |
+          flutter clean
+          flutter pub get
+
+      - name: Diagnóstico previo de código Dart
+        run: flutter analyze --no-fatal-infos || true
 
       - name: Compilar APK Release
-        run: flutter build apk --release --no-tree-shake-icons
+        run: flutter build apk --release --no-tree-shake-icons --verbose
 
       - name: Subir APK como artefacto de descarga directa
         uses: actions/upload-artifact@v4
