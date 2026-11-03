@@ -1,15 +1,14 @@
 // =========================================================================
-// CÓDIGO MAESTRO COMPLETO Y VERIFICADO: GESTIÓN DE LOTERÍA - CLUB DE BÀSQUET
-// Plataforma: Flutter 3.29+ / Android SDK 34 / Firebase Firestore + Auth + Excel
+// CÓDIGO MAESTRO COMPLETO: GESTIÓN DE LOTERÍA - CLUB DE BÀSQUET
+// Plataforma: Flutter 3.27+ / Android SDK 34 / Firebase Firestore + Excel
 // =========================================================================
 
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:excel/excel.dart';
+import 'package:excel/excel.dart' hide Border;
 import 'dart:io';
 
 void main() async {
@@ -17,10 +16,6 @@ void main() async {
   
   try {
     await Firebase.initializeApp();
-    await FirebaseAppCheck.instance.activate(
-      androidProvider: AndroidProvider.playIntegrity,
-      appleProvider: AppleProvider.appAttest,
-    );
   } catch (e) {
     debugPrint('Nota: Firebase no configurado localmente o en modo offline: $e');
   }
@@ -62,7 +57,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // PIN de tesorería local de respaldo (por defecto 1234)
   static const String _pinMaestro = '1234';
   bool _sesionTesoreriaActiva = false;
   String _filtroEquipo = 'Todos';
@@ -129,7 +123,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 return;
               }
 
-              // Intento con Firebase Auth si está configurado
               try {
                 await FirebaseAuth.instance.signInWithEmailAndPassword(
                   email: 'tesoreria@clubbasket.com',
@@ -174,7 +167,6 @@ class _HomeScreenState extends State<HomeScreen> {
           if (sheet == null) continue;
           final equipo = nombrePestana.trim();
 
-          // Función auxiliar para extraer el texto de una celda sin errores de tipo
           String obtenerTextoCelda(dynamic celda) {
             if (celda == null) return '';
             try {
@@ -184,7 +176,6 @@ class _HomeScreenState extends State<HomeScreen> {
             return celda.toString().trim();
           }
 
-          // Iterar saltando posible cabecera (fila 0)
           for (int i = 1; i < sheet.maxRows; i++) {
             final row = sheet.rows[i];
             if (row.isEmpty) continue;
@@ -299,17 +290,14 @@ class _HomeScreenState extends State<HomeScreen> {
             );
           }
 
-          // Extraer lista única de equipos para pestañas/chips
           final equipos = {'Todos', ...docs.map((d) => (d.data() as Map<String, dynamic>)['equipo']?.toString() ?? 'Sin equipo')}.toList();
 
-          // Filtrar por equipo
           final docsFiltrados = _filtroEquipo == 'Todos'
               ? docs
               : docs.where((d) => (d.data() as Map<String, dynamic>)['equipo'] == _filtroEquipo).toList();
 
           return Column(
             children: [
-              // Selector horizontal de categoría/equipo
               Container(
                 height: 52,
                 color: Colors.white,
@@ -338,7 +326,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const Divider(height: 1),
 
-              // Lista de tarjetas de jugadores con numeración correlativa
               Expanded(
                 child: ListView.builder(
                   itemCount: docsFiltrados.length,
@@ -346,7 +333,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   itemBuilder: (context, index) {
                     var data = docsFiltrados[index].data() as Map<String, dynamic>;
                     String id = docsFiltrados[index].id;
-                    int numeroCorrelativo = index + 1; // Numeración automática 1, 2, 3...
+                    int numeroCorrelativo = index + 1;
                     double pagado = (data['pagado'] is num) ? (data['pagado'] as num).toDouble() : 0.0;
                     double totalAPagar = (data['totalAPagar'] is num) ? (data['totalAPagar'] as num).toDouble() : 0.0;
                     bool estaPagado = pagado >= totalAPagar && totalAPagar > 0;
@@ -362,7 +349,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Row(
-                              mainAxisAlignment: MainAxisAlignment.between,
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Expanded(
                                   child: Row(
@@ -445,7 +432,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                       Expanded(
                                         child: Text(
                                           data['notas'].toString(),
-                                          style: TextStyle(fontSize: 12, color: Colors.amber.shade950, fontStyle: FontStyle.italic),
+                                          style: TextStyle(fontSize: 12, color: Colors.amber.shade900, fontStyle: FontStyle.italic),
                                           maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
                                         ),
@@ -457,7 +444,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             ],
                             const Divider(height: 24),
                             Row(
-                              mainAxisAlignment: MainAxisAlignment.between,
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text(
                                   (data['esPagoBeneficio'] ?? false)
@@ -818,4 +805,3 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 }
-
