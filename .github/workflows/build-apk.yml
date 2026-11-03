@@ -28,14 +28,12 @@ jobs:
       - name: Auto-reparar estructura Android si falta
         run: |
           echo "=== 1. Verificando estructura del proyecto ==="
-          # Si main.dart está en la raíz, moverlo a lib/
           if [ -f "main.dart" ] && [ ! -f "lib/main.dart" ]; then
             mkdir -p lib
             mv main.dart lib/main.dart
             echo "Movido main.dart a lib/main.dart"
           fi
 
-          # Generar carpeta android limpia en entorno aislado
           if [ ! -d "android" ]; then
             echo "Generando carpeta android oficial en entorno aislado..."
             mkdir -p /tmp/clean_flutter
@@ -46,35 +44,20 @@ jobs:
             echo "Carpeta android generada e integrada correctamente."
           fi
 
-          # Ajustar minSdkVersion 21, multiDexEnabled y evitar fallos de Lint o firma
           if [ -f "android/app/build.gradle" ]; then
             sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' android/app/build.gradle || true
             sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/g' android/app/build.gradle || true
-            sed -i '/defaultConfig {/a \        multiDexEnabled true' android/app/build.gradle || true
             sed -i 's/signingConfig = signingConfigs.release/signingConfig = signingConfigs.debug/g' android/app/build.gradle || true
-            sed -i 's/signingConfig signingConfigs.release/signingConfig signingConfigs.debug/g' android/app/build.gradle || true
-            cat << 'EOF' >> android/app/build.gradle
-
-android {
-    lintOptions {
-        checkReleaseBuilds false
-        abortOnError false
-    }
-}
-EOF
+            echo "android.defaultConfig.multiDexEnabled = true" >> android/app/build.gradle
+            echo "android.lintOptions.abortOnError = false" >> android/app/build.gradle
+            echo "android.lintOptions.checkReleaseBuilds = false" >> android/app/build.gradle
           fi
+
           if [ -f "android/app/build.gradle.kts" ]; then
             sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/g' android/app/build.gradle.kts || true
-            sed -i '/defaultConfig {/a \        multiDexEnabled = true' android/app/build.gradle.kts || true
-            cat << 'EOF' >> android/app/build.gradle.kts
-
-android {
-    lint {
-        checkReleaseBuilds = false
-        abortOnError = false
-    }
-}
-EOF
+            echo "android.defaultConfig.multiDexEnabled = true" >> android/app/build.gradle.kts
+            echo "android.lint.abortOnError = false" >> android/app/build.gradle.kts
+            echo "android.lint.checkReleaseBuilds = false" >> android/app/build.gradle.kts
           fi
 
       - name: Descargar dependencias
