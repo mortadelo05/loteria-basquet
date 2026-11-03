@@ -1,0 +1,40 @@
+name: Compilar APK Android - Club Bàsquet
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build-apk:
+    name: Build Android Release APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonar Repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 17 (JDK)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Instalar Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.0'
+          channel: 'stable'
+          cache: true
+
+      - name: Descargar dependencias
+        run: flutter pub get
+
+      - name: Compilar APK Release
+        run: flutter build apk --release --no-tree-shake-icons
+
+      - name: Subir APK como artefacto de descarga directa
+        uses: actions/upload-artifact@v4
+        with:
+          name: Loteria-Club-Basquet-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
