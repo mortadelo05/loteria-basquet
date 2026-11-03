@@ -26,6 +26,36 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: Auto-reparar estructura Android si falta
+        run: |
+          echo "=== 1. Verificando estructura del proyecto ==="
+          # Si main.dart está en la raíz, moverlo a lib/
+          if [ -f "main.dart" ] && [ ! -f "lib/main.dart" ]; then
+            mkdir -p lib
+            mv main.dart lib/main.dart
+            echo "Movido main.dart a lib/main.dart"
+          fi
+
+          # Generar carpeta android limpia en entorno aislado (inmune a nombres de repo con guiones)
+          if [ ! -d "android" ]; then
+            echo "Generando carpeta android oficial en entorno aislado..."
+            mkdir -p /tmp/clean_flutter
+            cd /tmp/clean_flutter
+            flutter create basket_app --platforms=android --org com.clubbasket.loteria
+            cd $GITHUB_WORKSPACE
+            cp -r /tmp/clean_flutter/basket_app/android ./android
+            echo "Carpeta android generada e integrada correctamente."
+          fi
+
+          # Ajustar minSdkVersion 21 requerido por Firebase
+          if [ -f "android/app/build.gradle" ]; then
+            sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' android/app/build.gradle || true
+            sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/g' android/app/build.gradle || true
+          fi
+          if [ -f "android/app/build.gradle.kts" ]; then
+            sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/g' android/app/build.gradle.kts || true
+          fi
+
       - name: Descargar dependencias
         run: flutter pub get
 
@@ -36,5 +66,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Loteria-Club-Basquet-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 7
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
