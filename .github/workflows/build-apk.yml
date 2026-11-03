@@ -26,7 +26,7 @@ jobs:
           flutter-version: '3.27.4'
           cache: true
 
-      - name: Auto-reparar estructura Android si falta
+      - name: Auto-reparar estructura Android oficial limpia
         run: |
           echo "=== 1. Verificando estructura del proyecto ==="
           if [ -f "main.dart" ] && [ ! -f "lib/main.dart" ]; then
@@ -35,31 +35,18 @@ jobs:
             echo "Movido main.dart a lib/main.dart"
           fi
 
-          if [ ! -d "android" ]; then
-            echo "Generando carpeta android oficial..."
-            mkdir -p /tmp/clean_flutter
-            cd /tmp/clean_flutter
-            flutter create basket_app --platforms=android --org com.clubbasket.loteria
-            cd $GITHUB_WORKSPACE
-            cp -r /tmp/clean_flutter/basket_app/android ./android
-            echo "Carpeta android generada e integrada correctamente."
-          fi
+          # Regenerar siempre una carpeta android limpia oficial de Flutter
+          rm -rf /tmp/clean_flutter
+          mkdir -p /tmp/clean_flutter
+          cd /tmp/clean_flutter
+          flutter create basket_app --platforms=android --org com.clubbasket.loteria
+          cd $GITHUB_WORKSPACE
+          rm -rf android
+          cp -r /tmp/clean_flutter/basket_app/android ./android
+          echo "Carpeta android limpia y oficial generada correctamente."
 
-          # Asignar 4GB de memoria para evitar que el compilador se quede sin RAM
-          mkdir -p android
+          # Memoria suficiente para compilación en la máquina virtual
           echo "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m" >> android/gradle.properties
-
-          # Configurar minSdkVersion 21 y modo release directo
-          if [ -f "android/app/build.gradle" ]; then
-            sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/g' android/app/build.gradle || true
-            sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 21/g' android/app/build.gradle || true
-            sed -i 's/signingConfig = signingConfigs.release/signingConfig = signingConfigs.debug/g' android/app/build.gradle || true
-            echo "android.defaultConfig.multiDexEnabled = true" >> android/app/build.gradle
-          fi
-          if [ -f "android/app/build.gradle.kts" ]; then
-            sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/g' android/app/build.gradle.kts || true
-            echo "android.defaultConfig.multiDexEnabled = true" >> android/app/build.gradle.kts
-          fi
 
       - name: Limpiar y descargar dependencias
         run: |
