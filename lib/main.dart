@@ -1,6 +1,5 @@
 // =========================================================================
-// CÓDIGO MAESTRO COMPLETO Y VERIFICADO: GESTIÓN DE LOTERÍA - CLUB DE BÀSQUET
-// Plataforma: Flutter 3.29+ / Android SDK 34 / Firebase Firestore + Auth + Excel
+// CÓDIGO MAESTRO COMPLETO: GESTIÓN DE LOTERÍA - CLUB DE BÀSQUET
 // =========================================================================
 
 import 'package:flutter/material.dart';
@@ -22,7 +21,7 @@ void main() async {
       appleProvider: AppleProvider.appAttest,
     );
   } catch (e) {
-    debugPrint('Nota: Firebase no configurado localmente o en modo offline: $e');
+    debugPrint('Nota: Firebase en modo local u offline: $e');
   }
 
   runApp(const ClubBasketApp());
@@ -62,7 +61,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // PIN de tesorería local de respaldo (por defecto 1234)
   static const String _pinMaestro = '1234';
   bool _sesionTesoreriaActiva = false;
   String _filtroEquipo = 'Todos';
@@ -92,7 +90,7 @@ class _HomeScreenState extends State<HomeScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Introduce el PIN de seguridad de 4 dígitos para acceder a las acciones de tesorería:',
+              'Introduce el PIN de 4 dígitos para acceder a las acciones de tesorería:',
               style: TextStyle(fontSize: 13, color: Colors.black87),
             ),
             const SizedBox(height: 12),
@@ -129,7 +127,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 return;
               }
 
-              // Intento con Firebase Auth si está configurado
               try {
                 await FirebaseAuth.instance.signInWithEmailAndPassword(
                   email: 'tesoreria@clubbasket.com',
@@ -142,7 +139,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('PIN Incorrecto (Prueba 1234 o credenciales válidas)'),
+                      content: Text('PIN Incorrecto (Prueba 1234)'),
                       backgroundColor: Colors.red,
                     ),
                   );
@@ -169,21 +166,30 @@ class _HomeScreenState extends State<HomeScreen> {
         final db = FirebaseFirestore.instance;
         int importados = 0;
 
+        // Función auxiliar para extraer el texto de una celda sin errores de compilación
+        String obtenerTextoCelda(dynamic celda) {
+          if (celda == null) return '';
+          try {
+            final dynamic v = celda.value;
+            if (v != null) return v.toString().trim();
+          } catch (_) {}
+          return celda.toString().trim();
+        }
+
         for (var nombrePestana in excel.tables.keys) {
           final sheet = excel.tables[nombrePestana];
           if (sheet == null) continue;
           final equipo = nombrePestana.trim();
 
-          // Iterar saltando posible cabecera (fila 0)
           for (int i = 1; i < sheet.maxRows; i++) {
             final row = sheet.rows[i];
             if (row.isEmpty) continue;
 
-            final cellA = row.isNotEmpty ? row[0] : null;
-            final cellB = row.length > 1 ? row[1] : null;
+            final dynamic cellA = row.isNotEmpty ? row[0] : null;
+            final dynamic cellB = row.length > 1 ? row[1] : null;
 
-            final String nombre = cellA?.value?.toString().trim() ?? '';
-            final String apellido = cellB?.value?.toString().trim() ?? '';
+            final String nombre = obtenerTextoCelda(cellA);
+            final String apellido = obtenerTextoCelda(cellB);
             final String nombreCompleto = apellido.isNotEmpty ? '$nombre $apellido' : nombre;
 
             if (nombreCompleto.isEmpty) continue;
@@ -233,7 +239,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           IconButton(
             icon: Icon(_sesionTesoreriaActiva ? Icons.lock_open : Icons.lock),
-            tooltip: _sesionTesoreriaActiva ? 'Sesión de Tesorería Activa' : 'Bloqueado',
+            tooltip: _sesionTesoreriaActiva ? 'Sesión Desbloqueada' : 'Bloqueado',
             onPressed: () {
               setState(() => _sesionTesoreriaActiva = !_sesionTesoreriaActiva);
               ScaffoldMessenger.of(context).showSnackBar(
@@ -289,17 +295,14 @@ class _HomeScreenState extends State<HomeScreen> {
             );
           }
 
-          // Extraer lista única de equipos para pestañas/chips
           final equipos = {'Todos', ...docs.map((d) => (d.data() as Map<String, dynamic>)['equipo']?.toString() ?? 'Sin equipo')}.toList();
 
-          // Filtrar por equipo
           final docsFiltrados = _filtroEquipo == 'Todos'
               ? docs
               : docs.where((d) => (d.data() as Map<String, dynamic>)['equipo'] == _filtroEquipo).toList();
 
           return Column(
             children: [
-              // Selector horizontal de categoría/equipo
               Container(
                 height: 52,
                 color: Colors.white,
@@ -328,7 +331,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const Divider(height: 1),
 
-              // Lista de tarjetas de jugadores con numeración correlativa
               Expanded(
                 child: ListView.builder(
                   itemCount: docsFiltrados.length,
@@ -336,7 +338,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   itemBuilder: (context, index) {
                     var data = docsFiltrados[index].data() as Map<String, dynamic>;
                     String id = docsFiltrados[index].id;
-                    int numeroCorrelativo = index + 1; // Numeración automática 1, 2, 3...
+                    int numeroCorrelativo = index + 1;
 
                     double pagado = (data['pagado'] is num) ? (data['pagado'] as num).toDouble() : 0.0;
                     double totalAPagar = (data['totalAPagar'] is num) ? (data['totalAPagar'] as num).toDouble() : 0.0;
