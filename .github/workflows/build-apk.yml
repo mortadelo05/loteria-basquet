@@ -45,8 +45,8 @@ jobs:
           cp -r /tmp/clean_flutter/basket_app/android ./android
           echo "Carpeta android limpia y oficial generada."
 
-          # 1. Forzar flutter.minSdkVersion=23 en local.properties
-          echo "flutter.minSdkVersion=23" > android/local.properties
+          # 1. Forzar propiedades de SDK moderno (Android 14 API 34, minSdk 24) en local.properties
+          echo "flutter.minSdkVersion=24" > android/local.properties
           echo "flutter.targetSdkVersion=34" >> android/local.properties
           echo "flutter.compileSdkVersion=34" >> android/local.properties
 
@@ -55,7 +55,7 @@ jobs:
           echo "android.useAndroidX=true" >> android/gradle.properties
           echo "android.enableJetifier=true" >> android/gradle.properties
 
-          # 3. Configuración definitiva de minSdk 23, permisos y tools:overrideLibrary
+          # 3. Configuración definitiva de compileSdk 34, targetSdk 34, minSdk 24 y firma Release
           python3 -c "import textwrap, sys; exec(textwrap.dedent(sys.stdin.read()))" << 'PYEOF'
           import os, re
 
@@ -66,42 +66,66 @@ jobs:
                   m = f.read()
               if 'xmlns:tools' not in m:
                   m = m.replace('<manifest ', '<manifest xmlns:tools="http://schemas.android.com/tools" ')
-              inserts = []
-              if 'overrideLibrary' not in m:
-                  inserts.append('    <uses-sdk tools:overrideLibrary="com.google.firebase.auth, io.flutter.plugins.firebase.auth, com.google.firebase, io.flutter.plugins.firebase.core, io.flutter.plugins.firebase.firestore" />')
-              if 'android.permission.INTERNET' not in m:
-                  inserts.append('    <uses-permission android:name="android.permission.INTERNET" />')
-              if 'android.permission.READ_EXTERNAL_STORAGE' not in m:
-                  inserts.append('    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />')
-              if 'android.permission.WRITE_EXTERNAL_STORAGE' not in m:
-                  inserts.append('    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />')
-              if inserts and '<application' in m:
-                  m = m.replace('<application', '\n'.join(inserts) + '\n    <application', 1)
+              
+              # Reemplazar o insertar uses-sdk con targetSdkVersion 34 explícito
+              sdk_tag = '    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" tools:overrideLibrary="com.google.firebase.auth, io.flutter.plugins.firebase.auth, com.google.firebase, io.flutter.plugins.firebase.core, io.flutter.plugins.firebase.firestore" />'
+              if '<uses-sdk' in m:
+                  m = re.sub(r'<uses-sdk[^>]*/>', sdk_tag, m)
+              else:
+                  m = m.replace('<application', sdk_tag + '
+    <application', 1)
+              
+              # Asegurar permisos de red y almacenamiento
+              for perm in ['android.permission.INTERNET', 'android.permission.READ_EXTERNAL_STORAGE', 'android.permission.WRITE_EXTERNAL_STORAGE']:
+                  if perm not in m:
+                      m = m.replace('<application', f'    <uses-permission android:name="{perm}" />
+    <application', 1)
+              
               with open(manifest, "w", encoding="utf-8") as f:
                   f.write(m)
-              print("✅ AndroidManifest.xml blindado con éxito.")
+              print("✅ AndroidManifest.xml configurado con targetSdkVersion 34 y minSdkVersion 24.")
 
-          # Forzar minSdk 23 en archivos gradle
+          # Forzar compileSdk 34, targetSdk 34, minSdk 24 y firma debug en release
           for path in ["android/app/build.gradle", "android/app/build.gradle.kts"]:
               if os.path.exists(path):
                   with open(path, "r", encoding="utf-8") as f:
                       g = f.read()
                   if path.endswith(".kts"):
-                      g = re.sub(r'minSdk\s*=.*', 'minSdk = 23', g)
+                      g = re.sub(r'compileSdks*=.*', 'compileSdk = 34', g)
+                      g = re.sub(r'minSdks*=.*', 'minSdk = 24', g)
+                      g = re.sub(r'targetSdks*=.*', 'targetSdk = 34', g)
+                      if 'targetSdk' not in g:
+                          g = g.replace('minSdk = 24', 'minSdk = 24
+        targetSdk = 34')
+                      if 'signingConfigs.getByName("debug")' not in g:
+                          g = re.sub(r'releases*{', 'release {
+            signingConfig = signingConfigs.getByName("debug")', g)
                   else:
-                      g = re.sub(r'minSdkVersion\s+.*', 'minSdkVersion 23', g)
-                      g = re.sub(r'minSdk\s*=.*', 'minSdk = 23', g)
+                      g = re.sub(r'compileSdkVersions+.*', 'compileSdkVersion 34', g)
+                      g = re.sub(r'compileSdks*=.*', 'compileSdk = 34', g)
+                      g = re.sub(r'minSdkVersions+.*', 'minSdkVersion 24', g)
+                      g = re.sub(r'minSdks*=.*', 'minSdk = 24', g)
+                      g = re.sub(r'targetSdkVersions+.*', 'targetSdkVersion 34', g)
+                      g = re.sub(r'targetSdks*=.*', 'targetSdk = 34', g)
+                      if 'targetSdkVersion' not in g and 'targetSdk' not in g:
+                          g = g.replace('minSdkVersion 24', 'minSdkVersion 24
+        targetSdkVersion 34')
+                      if 'signingConfigs.debug' not in g:
+                          g = re.sub(r'releases*{', 'release {
+            signingConfig signingConfigs.debug', g)
                   with open(path, "w", encoding="utf-8") as f:
                       f.write(g)
-                  print(f"✅ {path} actualizado a minSdk 23.")
+                  print(f"✅ {path} actualizado a compileSdk 34, minSdk 24, targetSdk 34.")
           PYEOF
 
       - name: Descargar dependencias
         run: |
           flutter clean
           flutter pub get
-          # Reasegurar minSdk = 23 tras pub get
-          echo "flutter.minSdkVersion=23" >> android/local.properties
+          # Reasegurar configuración en local.properties tras pub get
+          echo "flutter.minSdkVersion=24" > android/local.properties
+          echo "flutter.targetSdkVersion=34" >> android/local.properties
+          echo "flutter.compileSdkVersion=34" >> android/local.properties
           python3 -c "import textwrap, sys; exec(textwrap.dedent(sys.stdin.read()))" << 'PYEOF'
           import os, re
           for path in ["android/app/build.gradle", "android/app/build.gradle.kts"]:
@@ -109,10 +133,16 @@ jobs:
                   with open(path, "r", encoding="utf-8") as f:
                       g = f.read()
                   if path.endswith(".kts"):
-                      g = re.sub(r'minSdk\s*=.*', 'minSdk = 23', g)
+                      g = re.sub(r'compileSdks*=.*', 'compileSdk = 34', g)
+                      g = re.sub(r'minSdks*=.*', 'minSdk = 24', g)
+                      g = re.sub(r'targetSdks*=.*', 'targetSdk = 34', g)
                   else:
-                      g = re.sub(r'minSdkVersion\s+.*', 'minSdkVersion 23', g)
-                      g = re.sub(r'minSdk\s*=.*', 'minSdk = 23', g)
+                      g = re.sub(r'compileSdkVersions+.*', 'compileSdkVersion 34', g)
+                      g = re.sub(r'compileSdks*=.*', 'compileSdk = 34', g)
+                      g = re.sub(r'minSdkVersions+.*', 'minSdkVersion 24', g)
+                      g = re.sub(r'minSdks*=.*', 'minSdk = 24', g)
+                      g = re.sub(r'targetSdkVersions+.*', 'targetSdkVersion 34', g)
+                      g = re.sub(r'targetSdks*=.*', 'targetSdk = 34', g)
                   with open(path, "w", encoding="utf-8") as f:
                       f.write(g)
           PYEOF
@@ -124,7 +154,7 @@ jobs:
 
       - name: Compilar APK Android
         run: |
-          echo "=== Intentando compilar APK Release ==="
+          echo "=== Intentando compilar APK Release (Android 14 - API 34) ==="
           if flutter build apk --release --no-tree-shake-icons; then
             echo "✅ Compilación Release completada con éxito."
           else
