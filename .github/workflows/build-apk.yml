@@ -28,7 +28,7 @@ jobs:
 
       - name: Preparar y configurar proyecto Android
         run: |
-          echo "=== 1. Verificando estructura del proyecto ==="
+          echo "=== 1. Asegurar estructura del proyecto ==="
           if [ -f "main.dart" ] && [ ! -f "lib/main.dart" ]; then
             mkdir -p lib
             mv main.dart lib/main.dart
@@ -45,24 +45,42 @@ jobs:
           cp -r /tmp/clean_flutter/basket_app/android ./android
           echo "Carpeta android limpia y oficial generada."
 
-          # Forzar minSdk = 23 en la configuracion de Android
-          if [ -f "android/app/build.gradle.kts" ]; then
-            sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/g' android/app/build.gradle.kts
-            sed -i 's/minSdkVersion = flutter.minSdkVersion/minSdkVersion = 23/g' android/app/build.gradle.kts
-          fi
-          if [ -f "android/app/build.gradle" ]; then
-            sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/g' android/app/build.gradle
-          fi
+          # 1. Forzar flutter.minSdkVersion=23 en local.properties
+          echo "flutter.minSdkVersion=23" > android/local.properties
+          echo "flutter.targetSdkVersion=34" >> android/local.properties
+          echo "flutter.compileSdkVersion=34" >> android/local.properties
 
-          # Configurar memoria y compatibilidad en gradle.properties
+          # 2. Configurar memoria y compatibilidad en gradle.properties
           echo "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m" > android/gradle.properties
           echo "android.useAndroidX=true" >> android/gradle.properties
           echo "android.enableJetifier=true" >> android/gradle.properties
+
+          # 3. Sustitución universal de minSdk a 23 en archivos gradle
+          if [ -f "android/app/build.gradle.kts" ]; then
+            sed -i -E 's/minSdk(Version)?[ \t]*(=|[ \t]).*/minSdk = 23/g' android/app/build.gradle.kts
+          fi
+          if [ -f "android/app/build.gradle" ]; then
+            sed -i -E 's/minSdk(Version)?[ \t]*(=|[ \t]).*/minSdkVersion 23/g' android/app/build.gradle
+          fi
+
+          # 4. Inyectar tools:overrideLibrary en AndroidManifest.xml para garantizar el merger
+          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
+            grep -q 'xmlns:tools' android/app/src/main/AndroidManifest.xml || sed -i 's/<manifest /<manifest xmlns:tools="http:\/\/schemas.android.com\/tools" /g' android/app/src/main/AndroidManifest.xml
+            grep -q 'overrideLibrary' android/app/src/main/AndroidManifest.xml || sed -i '/<application/i \    <uses-sdk tools:overrideLibrary="com.google.firebase.auth, io.flutter.plugins.firebase.auth, com.google.firebase" \/>' android/app/src/main/AndroidManifest.xml
+          fi
 
       - name: Descargar dependencias
         run: |
           flutter clean
           flutter pub get
+          # Reasegurar minSdk = 23 tras pub get
+          echo "flutter.minSdkVersion=23" >> android/local.properties
+          if [ -f "android/app/build.gradle.kts" ]; then
+            sed -i -E 's/minSdk(Version)?[ \t]*(=|[ \t]).*/minSdk = 23/g' android/app/build.gradle.kts
+          fi
+          if [ -f "android/app/build.gradle" ]; then
+            sed -i -E 's/minSdk(Version)?[ \t]*(=|[ \t]).*/minSdkVersion 23/g' android/app/build.gradle
+          fi
 
       - name: Compilar APK Android
         run: |
@@ -70,7 +88,7 @@ jobs:
           if flutter build apk --release --no-tree-shake-icons; then
             echo "✅ Compilación Release completada con éxito."
           else
-            echo "⚠️ Release encontró restricciones de R8/firmas. Compilando APK Debug garantizado..."
+            echo "⚠️ Release encontró restricciones de firma o R8. Compilando APK Debug garantizado..."
             flutter build apk --debug --no-tree-shake-icons
             echo "✅ Compilación Debug completada con éxito."
           fi
