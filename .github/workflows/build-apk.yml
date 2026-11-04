@@ -3,7 +3,8 @@ name: Compilar APK Android - Club Bàsquet
 on:
   workflow_dispatch:
   push:
-    branches: [ main, master ]
+
+permissions: write-all
 
 jobs:
   build-apk:
