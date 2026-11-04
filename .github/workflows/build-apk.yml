@@ -57,16 +57,18 @@ jobs:
 
           # 3. Sustitución universal de minSdk a 23 en archivos gradle
           if [ -f "android/app/build.gradle.kts" ]; then
-            sed -i -E 's/minSdk(Version)?[ \t]*(=|[ \t]).*/minSdk = 23/g' android/app/build.gradle.kts
+            sed -i -E 's/minSdk(Version)?[ 	]*(=|[ 	]).*/minSdk = 23/g' android/app/build.gradle.kts
           fi
           if [ -f "android/app/build.gradle" ]; then
-            sed -i -E 's/minSdk(Version)?[ \t]*(=|[ \t]).*/minSdkVersion 23/g' android/app/build.gradle
+            sed -i -E 's/minSdk(Version)?[ 	]*(=|[ 	]).*/minSdkVersion 23/g' android/app/build.gradle
           fi
 
-          # 4. Inyectar tools:overrideLibrary en AndroidManifest.xml para garantizar el merger
+          # 4. Inyectar tools:overrideLibrary y permisos en AndroidManifest.xml
           if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
-            grep -q 'xmlns:tools' android/app/src/main/AndroidManifest.xml || sed -i 's/<manifest /<manifest xmlns:tools="http:\/\/schemas.android.com\/tools" /g' android/app/src/main/AndroidManifest.xml
-            grep -q 'overrideLibrary' android/app/src/main/AndroidManifest.xml || sed -i '/<application/i \    <uses-sdk tools:overrideLibrary="com.google.firebase.auth, io.flutter.plugins.firebase.auth, com.google.firebase" \/>' android/app/src/main/AndroidManifest.xml
+            grep -q 'xmlns:tools' android/app/src/main/AndroidManifest.xml || sed -i 's/<manifest /<manifest xmlns:tools="http://schemas.android.com/tools" /g' android/app/src/main/AndroidManifest.xml
+            grep -q 'overrideLibrary' android/app/src/main/AndroidManifest.xml || sed -i '/<application/i     <uses-sdk tools:overrideLibrary="com.google.firebase.auth, io.flutter.plugins.firebase.auth, com.google.firebase" />' android/app/src/main/AndroidManifest.xml
+            grep -q 'android.permission.INTERNET' android/app/src/main/AndroidManifest.xml || sed -i '/<application/i     <uses-permission android:name="android.permission.INTERNET" />' android/app/src/main/AndroidManifest.xml
+            grep -q 'android.permission.READ_EXTERNAL_STORAGE' android/app/src/main/AndroidManifest.xml || sed -i '/<application/i     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />' android/app/src/main/AndroidManifest.xml
           fi
 
       - name: Descargar dependencias
@@ -76,11 +78,16 @@ jobs:
           # Reasegurar minSdk = 23 tras pub get
           echo "flutter.minSdkVersion=23" >> android/local.properties
           if [ -f "android/app/build.gradle.kts" ]; then
-            sed -i -E 's/minSdk(Version)?[ \t]*(=|[ \t]).*/minSdk = 23/g' android/app/build.gradle.kts
+            sed -i -E 's/minSdk(Version)?[ 	]*(=|[ 	]).*/minSdk = 23/g' android/app/build.gradle.kts
           fi
           if [ -f "android/app/build.gradle" ]; then
-            sed -i -E 's/minSdk(Version)?[ \t]*(=|[ \t]).*/minSdkVersion 23/g' android/app/build.gradle
+            sed -i -E 's/minSdk(Version)?[ 	]*(=|[ 	]).*/minSdkVersion 23/g' android/app/build.gradle
           fi
+
+      - name: Validar sintaxis y tipos Dart
+        run: |
+          echo "=== Verificando integridad de código Dart ==="
+          flutter analyze --no-fatal-infos
 
       - name: Compilar APK Android
         run: |
@@ -100,3 +107,4 @@ jobs:
           path: build/app/outputs/flutter-apk/*.apk
           if-no-files-found: error
           retention-days: 7
+
