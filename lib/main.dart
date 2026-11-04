@@ -573,9 +573,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
           content: Text(
-            'ATENCIÓN: Se eliminarán TODOS los jugadores registrados en "$equipo" y sus datos de cobro.
-
-Esta acción no se puede deshacer.',
+            'ATENCIÓN: Se eliminarán TODOS los jugadores registrados en "$equipo" y sus datos de cobro.\n\nEsta acción no se puede deshacer.',
             style: const TextStyle(fontSize: 13, height: 1.4),
           ),
           actions: [
@@ -708,7 +706,7 @@ Esta acción no se puede deshacer.',
                   borderRadius: BorderRadius.circular(12),
                   side: BorderSide(color: Colors.green.shade300),
                 ),
-                tileColor: Colors.green.shade50.withOpacity(0.5),
+                tileColor: Colors.green.shade50.withValues(alpha: 0.5),
                 leading: const CircleAvatar(
                   backgroundColor: Color(0xFF107C41),
                   child: Icon(Icons.table_chart, color: Colors.white, size: 20),
@@ -728,7 +726,7 @@ Esta acción no se puede deshacer.',
                   borderRadius: BorderRadius.circular(12),
                   side: BorderSide(color: Colors.blueGrey.shade200),
                 ),
-                tileColor: Colors.blueGrey.shade50.withOpacity(0.5),
+                tileColor: Colors.blueGrey.shade50.withValues(alpha: 0.5),
                 leading: const CircleAvatar(
                   backgroundColor: Color(0xFF1F4E79),
                   child: Icon(Icons.description, color: Colors.white, size: 20),
@@ -748,7 +746,7 @@ Esta acción no se puede deshacer.',
                   borderRadius: BorderRadius.circular(12),
                   side: BorderSide(color: Colors.teal.shade200),
                 ),
-                tileColor: Colors.teal.shade50.withOpacity(0.5),
+                tileColor: Colors.teal.shade50.withValues(alpha: 0.5),
                 leading: const CircleAvatar(
                   backgroundColor: Color(0xFF25D366),
                   child: Icon(Icons.share, color: Colors.white, size: 20),
@@ -1242,8 +1240,7 @@ Esta acción no se puede deshacer.',
                       return Center(
                         child: Padding(
                           padding: const EdgeInsets.all(24.0),
-                          child: Text('Error al conectar con Firestore:
-${snapshot.error}', textAlign: TextAlign.center),
+                          child: Text('Error al conectar con Firestore:\n${snapshot.error}', textAlign: TextAlign.center),
                         ),
                       );
                     }
@@ -1357,7 +1354,7 @@ ${snapshot.error}', textAlign: TextAlign.center),
           decoration: BoxDecoration(
             color: Colors.white,
             boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 4, offset: const Offset(0, 2)),
+              BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 4, offset: const Offset(0, 2)),
             ],
           ),
           child: Row(
