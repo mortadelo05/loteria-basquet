@@ -9,7 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:excel/excel.dart' hide Border;
+import 'package:excel/excel.dart' as excel_pkg;
 import 'dart:io';
 import 'dart:convert';
 
@@ -771,10 +771,10 @@ Esta acción no se puede deshacer.',
 
   Future<void> _generarYGuardarExcel(BuildContext context, List<Map<String, dynamic>> docs) async {
     try {
-      var excel = Excel.createExcel();
-      final Sheet sheetResumen = excel['Resumen Tesorería'];
+      var excel = excel_pkg.Excel.createExcel();
+      final excel_pkg.Sheet sheetResumen = excel['Resumen Tesorería'];
       excel.setDefaultSheet('Resumen Tesorería');
-      if (excel.sheets.containsKey('Sheet1')) {
+      if (excel.tables.containsKey('Sheet1') && excel.tables.keys.length >= 2) {
         excel.delete('Sheet1');
       }
 
@@ -796,33 +796,38 @@ Esta acción no se puede deshacer.',
       }
       double totalPendiente = (totalAPagar - totalRecaudado).clamp(0.0, double.infinity);
 
-      sheetResumen.appendRow([TextCellValue('INFORME DE LOTERÍA - CLUB DE BÀSQUET'), TextCellValue('')]);
-      sheetResumen.appendRow([TextCellValue('Fecha de Generación:'), TextCellValue(DateTime.now().toString().substring(0, 10))]);
-      sheetResumen.appendRow([TextCellValue(''), TextCellValue('')]);
-      sheetResumen.appendRow([TextCellValue('Concepto Global'), TextCellValue('Valor')]);
-      sheetResumen.appendRow([TextCellValue('Total Jugadores / Vendedores'), IntCellValue(docs.length)]);
-      sheetResumen.appendRow([TextCellValue('Total Previsto a Recaudar (€)'), DoubleCellValue(totalAPagar)]);
-      sheetResumen.appendRow([TextCellValue('Total Cobrado en Tesorería (€)'), DoubleCellValue(totalRecaudado)]);
-      sheetResumen.appendRow([TextCellValue('Total Pendiente de Cobro (€)'), DoubleCellValue(totalPendiente)]);
-      sheetResumen.appendRow([TextCellValue('Papeletas Físicas Entregadas'), TextCellValue('$entregadasTotales de ${docs.length}')]);
-      sheetResumen.appendRow([TextCellValue('Total Papeletas Asignadas'), IntCellValue(papeletasTotales)]);
+      // Celdas tipadas seguras con excel_pkg
+      excel_pkg.CellValue txt(String s) => excel_pkg.TextCellValue(s);
+      excel_pkg.CellValue intVal(int i) => excel_pkg.IntCellValue(i);
+      excel_pkg.CellValue numVal(double d) => excel_pkg.DoubleCellValue(d);
+
+      sheetResumen.appendRow([txt('INFORME DE LOTERÍA - CLUB DE BÀSQUET'), txt('')]);
+      sheetResumen.appendRow([txt('Fecha de Generación:'), txt(DateTime.now().toString().substring(0, 10))]);
+      sheetResumen.appendRow([txt(''), txt('')]);
+      sheetResumen.appendRow([txt('Concepto Global'), txt('Valor')]);
+      sheetResumen.appendRow([txt('Total Jugadores / Vendedores'), intVal(docs.length)]);
+      sheetResumen.appendRow([txt('Total Previsto a Recaudar (€)'), numVal(totalAPagar)]);
+      sheetResumen.appendRow([txt('Total Cobrado en Tesorería (€)'), numVal(totalRecaudado)]);
+      sheetResumen.appendRow([txt('Total Pendiente de Cobro (€)'), numVal(totalPendiente)]);
+      sheetResumen.appendRow([txt('Papeletas Físicas Entregadas'), txt('$entregadasTotales de ${docs.length}')]);
+      sheetResumen.appendRow([txt('Total Papeletas Asignadas'), intVal(papeletasTotales)]);
 
       final Set<String> equiposSet = docs.map((d) => (d['equipo'] ?? 'Sin equipo').toString().trim()).toSet();
       for (var eq in equiposSet) {
         final safeName = eq.length > 28 ? eq.substring(0, 28) : eq;
-        final Sheet sheetEq = excel[safeName];
+        final excel_pkg.Sheet sheetEq = excel[safeName];
 
         sheetEq.appendRow([
-          TextCellValue('Nº'),
-          TextCellValue('Nombre Completo'),
-          TextCellValue('Modalidad / Talonario'),
-          TextCellValue('Papeletas'),
-          TextCellValue('Total Asignado (€)'),
-          TextCellValue('Pagado (€)'),
-          TextCellValue('Pendiente (€)'),
-          TextCellValue('Estado Cobro'),
-          TextCellValue('Papeletas Entregadas'),
-          TextCellValue('Notas / Observaciones'),
+          txt('Nº'),
+          txt('Nombre Completo'),
+          txt('Modalidad / Talonario'),
+          txt('Papeletas'),
+          txt('Total Asignado (€)'),
+          txt('Pagado (€)'),
+          txt('Pendiente (€)'),
+          txt('Estado Cobro'),
+          txt('Papeletas Entregadas'),
+          txt('Notas / Observaciones'),
         ]);
 
         final jugadoresEq = docs.where((d) => (d['equipo'] ?? 'Sin equipo').toString().trim() == eq).toList();
@@ -846,22 +851,21 @@ Esta acción no se puede deshacer.',
           }
 
           sheetEq.appendRow([
-            IntCellValue(i + 1),
-            TextCellValue(nombre),
-            TextCellValue(esBeneficio ? 'Beneficio Directo (20€)' : talonario),
-            IntCellValue(esBeneficio ? 0 : paps),
-            DoubleCellValue(asignado),
-            DoubleCellValue(pag),
-            DoubleCellValue(pend),
-            TextCellValue(estadoCobro),
-            TextCellValue(entregado ? 'SÍ (Entregado)' : 'NO (Pendiente)'),
-            TextCellValue(notas),
+            intVal(i + 1),
+            txt(nombre),
+            txt(esBeneficio ? 'Beneficio Directo (20€)' : talonario),
+            intVal(esBeneficio ? 0 : paps),
+            numVal(asignado),
+            numVal(pag),
+            numVal(pend),
+            txt(estadoCobro),
+            txt(entregado ? 'SÍ (Entregado)' : 'NO (Pendiente)'),
+            txt(notas),
           ]);
         }
       }
 
-      List<int>? bytes = excel.save();
-      bytes ??= excel.encode();
+      final List<int>? bytes = excel.save();
 
       if (bytes != null) {
         final String fecha = DateTime.now().toString().substring(0, 10).replaceAll(':', '-');
@@ -1114,7 +1118,7 @@ Esta acción no se puede deshacer.',
 
       if (result != null && result.files.single.path != null) {
         final fileBytes = File(result.files.single.path!).readAsBytesSync();
-        final excel = Excel.decodeBytes(fileBytes);
+        final excel = excel_pkg.Excel.decodeBytes(fileBytes);
         int importados = 0;
 
         for (var nombrePestana in excel.tables.keys) {
