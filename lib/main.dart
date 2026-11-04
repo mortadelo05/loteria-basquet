@@ -1,23 +1,70 @@
 // =========================================================================
-// CÓDIGO MAESTRO COMPLETO: GESTIÓN DE LOTERÍA - CLUB DE BÀSQUET
-// Plataforma: Flutter 3.27+ / Android SDK 34 / Firebase Firestore + Excel
+// CÓDIGO MAESTRO COMPLETO Y BLINDADO: GESTIÓN DE LOTERÍA - CLUB DE BÀSQUET
+// Plataforma: Flutter 3.27+ / Android SDK 34 / Modo Dual: Firestore + Local Autónomo
 // =========================================================================
 
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:excel/excel.dart' hide Border;
 import 'dart:io';
+import 'dart:convert';
+
+// Variable global de conectividad con Firebase
+bool gFirebaseConectado = false;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
+  // 1. Evitar la pantalla gris bajo cualquier fallo de inicialización
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return Material(
+      color: const Color(0xFFF8F9FA),
+      child: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.sports_basketball, size: 64, color: Color(0xFF1F4E79)),
+                const SizedBox(height: 16),
+                const Text(
+                  'Lotería Club Bàsquet',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1F4E79)),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Iniciando en modo seguro autónomo...',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 14, color: Colors.black87),
+                ),
+                const SizedBox(height: 20),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1F4E79),
+                    foregroundColor: Colors.white,
+                  ),
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Entrar a la Aplicación'),
+                  onPressed: () => runApp(const ClubBasketApp()),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  };
+
+  // 2. Intentar inicializar Firebase de forma segura y no bloqueante
   try {
     await Firebase.initializeApp();
+    gFirebaseConectado = Firebase.apps.isNotEmpty;
   } catch (e) {
-    debugPrint('Nota: Firebase no configurado localmente o en modo offline: $e');
+    debugPrint('Firebase no configurado o sin google-services.json. Iniciando Modo Local Autónomo: $e');
+    gFirebaseConectado = false;
   }
 
   runApp(const ClubBasketApp());
@@ -61,8 +108,79 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _sesionTesoreriaActiva = false;
   String _filtroEquipo = 'Todos';
 
+  // Almacén de jugadores local para cuando no haya Firebase configurado
+  List<Map<String, dynamic>> _jugadoresLocales = [];
+  bool _cargandoDatos = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _inicializarDatos();
+  }
+
+  Future<void> _inicializarDatos() async {
+    if (!gFirebaseConectado) {
+      _cargarDatosLocales();
+      // Si la lista está vacía, añadimos 2 jugadores iniciales de muestra
+      if (_jugadoresLocales.isEmpty) {
+        _jugadoresLocales = [
+          {
+            'id': '1',
+            'nombre': 'Marc Soler Garcia',
+            'equipo': 'Junior Masculí',
+            'esPagoBeneficio': false,
+            'talonario': '001-050',
+            'papeletas': 20,
+            'totalAPagar': 100.0,
+            'pagado': 100.0,
+            'notas': 'Pagado completo en mano',
+          },
+          {
+            'id': '2',
+            'nombre': 'Pol Rodriguez Valls',
+            'equipo': 'Cadet Masculí',
+            'esPagoBeneficio': true,
+            'talonario': null,
+            'papeletas': 0,
+            'totalAPagar': 20.0,
+            'pagado': 0.0,
+            'notas': 'Modalidad aportación beneficio 20€',
+          },
+        ];
+        _guardarDatosLocales();
+      }
+    }
+    setState(() => _cargandoDatos = false);
+  }
+
+  void _guardarDatosLocales() {
+    try {
+      final file = File('/data/user/0/com.clubbasket.loteria/files/loteria_datos.json');
+      if (!file.parent.existsSync()) {
+        file.parent.createSync(recursive: true);
+      }
+      file.writeAsStringSync(jsonEncode(_jugadoresLocales));
+    } catch (_) {
+      try {
+        final dir = Directory.systemTemp;
+        File('${dir.path}/loteria_datos.json').writeAsStringSync(jsonEncode(_jugadoresLocales));
+      } catch (_) {}
+    }
+  }
+
+  void _cargarDatosLocales() {
+    try {
+      final file = File('/data/user/0/com.clubbasket.loteria/files/loteria_datos.json');
+      if (file.existsSync()) {
+        final raw = file.readAsStringSync();
+        final List<dynamic> parsed = jsonDecode(raw);
+        _jugadoresLocales = parsed.map((e) => Map<String, dynamic>.from(e)).toList();
+      }
+    } catch (_) {}
+  }
+
   void _verificarPinYEjecutar(BuildContext context, VoidCallback accion) {
-    if (_sesionTesoreriaActiva || FirebaseAuth.instance.currentUser != null) {
+    if (_sesionTesoreriaActiva) {
       accion();
     } else {
       _mostrarDialogoPin(context, accion);
@@ -86,7 +204,7 @@ class _HomeScreenState extends State<HomeScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Introduce el PIN de seguridad de 4 dígitos para acceder a las acciones de tesorería:',
+              'Introduce el PIN de 4 dígitos para autorizar acciones de tesorería:',
               style: TextStyle(fontSize: 13, color: Colors.black87),
             ),
             const SizedBox(height: 12),
@@ -114,32 +232,27 @@ class _HomeScreenState extends State<HomeScreen> {
               backgroundColor: const Color(0xFF1F4E79),
               foregroundColor: Colors.white,
             ),
-            onPressed: () async {
+            onPressed: () {
               final pin = pinController.text.trim();
               if (pin == _pinMaestro) {
                 setState(() => _sesionTesoreriaActiva = true);
                 Navigator.pop(ctx);
                 onSuccess();
-                return;
-              }
-
-              try {
-                await FirebaseAuth.instance.signInWithEmailAndPassword(
-                  email: 'tesoreria@clubbasket.com',
-                  password: pin,
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Sesión de tesorería desbloqueada con éxito'),
+                    backgroundColor: Colors.green,
+                    duration: Duration(seconds: 2),
+                  ),
                 );
-                setState(() => _sesionTesoreriaActiva = true);
-                Navigator.pop(ctx);
-                onSuccess();
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('PIN Incorrecto (Prueba 1234 o credenciales válidas)'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('PIN Incorrecto (El PIN por defecto es 1234)'),
+                    backgroundColor: Colors.red,
+                    duration: Duration(seconds: 2),
+                  ),
+                );
               }
             },
             child: const Text('Acceder'),
@@ -159,7 +272,6 @@ class _HomeScreenState extends State<HomeScreen> {
       if (result != null && result.files.single.path != null) {
         final fileBytes = File(result.files.single.path!).readAsBytesSync();
         final excel = Excel.decodeBytes(fileBytes);
-        final db = FirebaseFirestore.instance;
         int importados = 0;
 
         for (var nombrePestana in excel.tables.keys) {
@@ -189,7 +301,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
             if (nombreCompleto.isEmpty) continue;
 
-            await db.collection('vendedores').add({
+            final nuevoItem = {
+              'id': 'jugador_${DateTime.now().microsecondsSinceEpoch}_$importados',
               'equipo': equipo,
               'nombre': nombreCompleto,
               'esPagoBeneficio': false,
@@ -197,10 +310,21 @@ class _HomeScreenState extends State<HomeScreen> {
               'papeletas': 0,
               'totalAPagar': 0.0,
               'pagado': 0.0,
-              'creadoEn': FieldValue.serverTimestamp(),
-            });
+              'notas': '',
+            };
+
+            if (gFirebaseConectado) {
+              await FirebaseFirestore.instance.collection('vendedores').add(nuevoItem);
+            } else {
+              _jugadoresLocales.add(nuevoItem);
+            }
             importados++;
           }
+        }
+
+        if (!gFirebaseConectado) {
+          _guardarDatosLocales();
+          setState(() {});
         }
 
         if (mounted) {
@@ -234,7 +358,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           IconButton(
             icon: Icon(_sesionTesoreriaActiva ? Icons.lock_open : Icons.lock),
-            tooltip: _sesionTesoreriaActiva ? 'Sesión de Tesorería Activa' : 'Bloqueado',
+            tooltip: _sesionTesoreriaActiva ? 'Sesión de Tesorería Activa' : 'Bloqueado con PIN',
             onPressed: () {
               setState(() => _sesionTesoreriaActiva = !_sesionTesoreriaActiva);
               ScaffoldMessenger.of(context).showSnackBar(
@@ -247,257 +371,32 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance.collection('vendedores').orderBy('equipo').snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          if (snapshot.hasError) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Text('Error al conectar con Firestore:\n${snapshot.error}', textAlign: TextAlign.center),
-              ),
-            );
-          }
-
-          var docs = snapshot.data?.docs ?? [];
-
-          if (docs.isEmpty) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.sports_basketball, size: 72, color: Colors.grey.shade400),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'No hay jugadores cargados.',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Usa el icono superior para importar un archivo Excel por pestañas o pulsa "Nuevo Jugador" para dar de alta uno manual.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey, fontSize: 14),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-
-          final equipos = {'Todos', ...docs.map((d) => (d.data() as Map<String, dynamic>)['equipo']?.toString() ?? 'Sin equipo')}.toList();
-
-          final docsFiltrados = _filtroEquipo == 'Todos'
-              ? docs
-              : docs.where((d) => (d.data() as Map<String, dynamic>)['equipo'] == _filtroEquipo).toList();
-
-          return Column(
-            children: [
-              Container(
-                height: 52,
-                color: Colors.white,
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  itemCount: equipos.length,
-                  itemBuilder: (context, i) {
-                    final eq = equipos[i];
-                    final isSelected = _filtroEquipo == eq;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8.0),
-                      child: FilterChip(
-                        selected: isSelected,
-                        label: Text(eq),
-                        selectedColor: const Color(0x261F4E79),
-                        labelStyle: TextStyle(
-                          color: isSelected ? const Color(0xFF1F4E79) : Colors.black87,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+      body: _cargandoDatos
+          ? const Center(child: CircularProgressIndicator())
+          : gFirebaseConectado
+              ? StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance.collection('vendedores').orderBy('equipo').snapshots(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (snapshot.hasError) {
+                      return Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24.0),
+                          child: Text('Error al conectar con Firestore:\n${snapshot.error}', textAlign: TextAlign.center),
                         ),
-                        onSelected: (_) => setState(() => _filtroEquipo = eq),
-                      ),
-                    );
+                      );
+                    }
+                    final docs = (snapshot.data?.docs ?? []).map((d) {
+                      final map = Map<String, dynamic>.from(d.data() as Map<String, dynamic>);
+                      map['id'] = d.id;
+                      return map;
+                    }).toList();
+                    return _construirCuerpoConLista(docs);
                   },
-                ),
-              ),
-              const Divider(height: 1),
-
-              Expanded(
-                child: ListView.builder(
-                  itemCount: docsFiltrados.length,
-                  padding: const EdgeInsets.only(bottom: 80, top: 8),
-                  itemBuilder: (context, index) {
-                    var data = docsFiltrados[index].data() as Map<String, dynamic>;
-                    String id = docsFiltrados[index].id;
-                    int numeroCorrelativo = index + 1;
-                    double pagado = (data['pagado'] is num) ? (data['pagado'] as num).toDouble() : 0.0;
-                    double totalAPagar = (data['totalAPagar'] is num) ? (data['totalAPagar'] as num).toDouble() : 0.0;
-                    bool estaPagado = pagado >= totalAPagar && totalAPagar > 0;
-                    double porcentaje = totalAPagar > 0 ? (pagado / totalAPagar).clamp(0.0, 1.0) : 0.0;
-
-                    return Card(
-                      elevation: 2,
-                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Expanded(
-                                  child: Row(
-                                    children: [
-                                      CircleAvatar(
-                                        backgroundColor: estaPagado ? Colors.green.shade50 : Colors.orange.shade50,
-                                        child: Text(
-                                          '$numeroCorrelativo',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            color: estaPagado ? Colors.green.shade700 : Colors.orange.shade800,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              data['nombre'] ?? '',
-                                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                            Text(
-                                              data['equipo'] ?? '',
-                                              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      icon: Icon(
-                                        Icons.note_alt_outlined,
-                                        color: (data['notas'] != null && data['notas'].toString().trim().isNotEmpty)
-                                            ? Colors.amber.shade800
-                                            : Colors.grey,
-                                      ),
-                                      tooltip: 'Notas de Tesorería',
-                                      onPressed: () => _mostrarDialogoNotas(
-                                        context,
-                                        id,
-                                        data['nombre'] ?? '',
-                                        data['notas']?.toString() ?? '',
-                                      ),
-                                    ),
-                                    IconButton(
-                                      icon: const Icon(Icons.settings_outlined, color: Colors.grey),
-                                      tooltip: 'Asignar Talonario',
-                                      onPressed: () => _verificarPinYEjecutar(
-                                        context,
-                                        () => _mostrarDialogoAsignacion(context, id, data['nombre'] ?? '', data),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                            if (data['notas'] != null && data['notas'].toString().trim().isNotEmpty) ...[
-                              const SizedBox(height: 8),
-                              GestureDetector(
-                                onTap: () => _mostrarDialogoNotas(context, id, data['nombre'] ?? '', data['notas']?.toString() ?? ''),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: Colors.amber.shade50,
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: Colors.amber.shade200),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(Icons.edit_note, size: 16, color: Colors.amber.shade900),
-                                      const SizedBox(width: 6),
-                                      Expanded(
-                                        child: Text(
-                                          data['notas'].toString(),
-                                          style: TextStyle(fontSize: 12, color: Colors.amber.shade900, fontStyle: FontStyle.italic),
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ],
-                            const Divider(height: 24),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  (data['esPagoBeneficio'] ?? false)
-                                      ? 'Modalidad: Beneficio Directo (20 €)'
-                                      : 'Talonario: ${data['talonario'] ?? "Sin asignar"}',
-                                  style: TextStyle(fontSize: 13, color: Colors.blueGrey.shade700),
-                                ),
-                                Text(
-                                  '${pagado.toStringAsFixed(2)} € / ${totalAPagar.toStringAsFixed(2)} €',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                    color: estaPagado ? Colors.green.shade800 : Colors.black87,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: LinearProgressIndicator(
-                                value: porcentaje,
-                                backgroundColor: Colors.grey.shade200,
-                                color: estaPagado ? Colors.green.shade600 : Colors.orange.shade600,
-                                minHeight: 8,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton.icon(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: estaPagado ? Colors.green.shade50 : const Color(0xFF1F4E79),
-                                  foregroundColor: estaPagado ? Colors.green.shade800 : Colors.white,
-                                  elevation: 0,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                ),
-                                icon: Icon(estaPagado ? Icons.check_circle : Icons.euro, size: 18),
-                                label: Text(estaPagado ? 'Completado (100%)' : 'Registrar Cobro'),
-                                onPressed: () => _mostrarDialogoCobro(context, id, data['nombre'] ?? '', pagado, totalAPagar),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          );
-        },
-      ),
+                )
+              : _construirCuerpoConLista(_jugadoresLocales),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: const Color(0xFF1F4E79),
         foregroundColor: Colors.white,
@@ -505,6 +404,325 @@ class _HomeScreenState extends State<HomeScreen> {
         label: const Text('Nuevo Jugador'),
         icon: const Icon(Icons.person_add),
       ),
+    );
+  }
+
+  Widget _construirCuerpoConLista(List<Map<String, dynamic>> docs) {
+    if (docs.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.sports_basketball, size: 72, color: Colors.grey.shade400),
+              const SizedBox(height: 16),
+              const Text(
+                'No hay jugadores cargados.',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Usa el icono superior para importar un archivo Excel por pestañas o pulsa "Nuevo Jugador" para dar de alta uno manual.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey, fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Estadísticas globales
+    double totalRecaudado = 0.0;
+    double totalAPagarGeneral = 0.0;
+    int papeletasTotales = 0;
+    for (var d in docs) {
+      final double pagado = (d['pagado'] is num) ? (d['pagado'] as num).toDouble() : 0.0;
+      final double total = (d['totalAPagar'] is num) ? (d['totalAPagar'] as num).toDouble() : 0.0;
+      final int paps = (d['papeletas'] is num) ? (d['papeletas'] as num).toInt() : 0;
+      totalRecaudado += pagado;
+      totalAPagarGeneral += total;
+      papeletasTotales += paps;
+    }
+    double totalPendiente = (totalAPagarGeneral - totalRecaudado).clamp(0.0, double.infinity);
+
+    // Extraer lista única de equipos para pestañas/chips
+    final equipos = {'Todos', ...docs.map((d) => d['equipo']?.toString() ?? 'Sin equipo')}.toList();
+
+    // Filtrar por equipo
+    final docsFiltrados = _filtroEquipo == 'Todos'
+        ? docs
+        : docs.where((d) => d['equipo'] == _filtroEquipo).toList();
+
+    return Column(
+      children: [
+        // Barra informativa de Modo (Nube vs Local Autónomo)
+        Container(
+          width: double.infinity,
+          color: gFirebaseConectado ? Colors.teal.shade50 : const Color(0xFFEBF3FA),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              Icon(
+                gFirebaseConectado ? Icons.cloud_done : Icons.phone_android,
+                size: 16,
+                color: gFirebaseConectado ? Colors.teal.shade700 : const Color(0xFF1F4E79),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  gFirebaseConectado
+                      ? 'Nube Firestore Conectada'
+                      : 'Modo Local Autónomo (Datos guardados en este dispositivo)',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: gFirebaseConectado ? Colors.teal.shade800 : const Color(0xFF1F4E79),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        // Barra de Resumen Financiero
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 4, offset: const Offset(0, 2)),
+            ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _itemEstadistica('Recaudado', '${totalRecaudado.toStringAsFixed(0)} €', Colors.green.shade700),
+              _itemEstadistica('Pendiente', '${totalPendiente.toStringAsFixed(0)} €', Colors.orange.shade800),
+              _itemEstadistica('Total Objetivo', '${totalAPagarGeneral.toStringAsFixed(0)} €', const Color(0xFF1F4E79)),
+              _itemEstadistica('Papeletas', '$papeletasTotales', Colors.blueGrey.shade800),
+            ],
+          ),
+        ),
+
+        // Selector horizontal de categoría/equipo
+        Container(
+          height: 48,
+          color: const Color(0xFFF1F5F9),
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            itemCount: equipos.length,
+            itemBuilder: (context, i) {
+              final eq = equipos[i];
+              final isSelected = _filtroEquipo == eq;
+              return Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: FilterChip(
+                  selected: isSelected,
+                  label: Text(eq),
+                  selectedColor: const Color(0x261F4E79),
+                  labelStyle: TextStyle(
+                    color: isSelected ? const Color(0xFF1F4E79) : Colors.black87,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    fontSize: 12,
+                  ),
+                  onSelected: (_) => setState(() => _filtroEquipo = eq),
+                ),
+              );
+            },
+          ),
+        ),
+
+        // Lista de tarjetas de jugadores con numeración correlativa
+        Expanded(
+          child: ListView.builder(
+            itemCount: docsFiltrados.length,
+            padding: const EdgeInsets.only(bottom: 80, top: 8),
+            itemBuilder: (context, index) {
+              var data = docsFiltrados[index];
+              String id = data['id'] ?? index.toString();
+              int numeroCorrelativo = index + 1;
+              double pagado = (data['pagado'] is num) ? (data['pagado'] as num).toDouble() : 0.0;
+              double totalAPagar = (data['totalAPagar'] is num) ? (data['totalAPagar'] as num).toDouble() : 0.0;
+              bool estaPagado = pagado >= totalAPagar && totalAPagar > 0;
+              double porcentaje = totalAPagar > 0 ? (pagado / totalAPagar).clamp(0.0, 1.0) : 0.0;
+
+              return Card(
+                elevation: 2,
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  backgroundColor: estaPagado ? Colors.green.shade50 : Colors.orange.shade50,
+                                  child: Text(
+                                    '$numeroCorrelativo',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: estaPagado ? Colors.green.shade700 : Colors.orange.shade800,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        data['nombre'] ?? '',
+                                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      Text(
+                                        data['equipo'] ?? '',
+                                        style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: Icon(
+                                  Icons.note_alt_outlined,
+                                  color: (data['notas'] != null && data['notas'].toString().trim().isNotEmpty)
+                                      ? Colors.amber.shade800
+                                      : Colors.grey,
+                                ),
+                                tooltip: 'Notas de Tesorería',
+                                onPressed: () => _mostrarDialogoNotas(
+                                  context,
+                                  id,
+                                  data['nombre'] ?? '',
+                                  data['notas']?.toString() ?? '',
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.settings_outlined, color: Colors.grey),
+                                tooltip: 'Asignar Talonario',
+                                onPressed: () => _verificarPinYEjecutar(
+                                  context,
+                                  () => _mostrarDialogoAsignacion(context, id, data['nombre'] ?? '', data),
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
+                                tooltip: 'Eliminar Jugador',
+                                onPressed: () => _verificarPinYEjecutar(
+                                  context,
+                                  () => _confirmarEliminarJugador(context, id, data['nombre'] ?? ''),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      if (data['notas'] != null && data['notas'].toString().trim().isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        GestureDetector(
+                          onTap: () => _mostrarDialogoNotas(context, id, data['nombre'] ?? '', data['notas']?.toString() ?? ''),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.amber.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.amber.shade200),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.edit_note, size: 16, color: Colors.amber.shade900),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    data['notas'].toString(),
+                                    style: TextStyle(fontSize: 12, color: Colors.amber.shade900, fontStyle: FontStyle.italic),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                      const Divider(height: 24),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            (data['esPagoBeneficio'] ?? false)
+                                ? 'Modalidad: Beneficio Directo (20 €)'
+                                : 'Talonario: ${data['talonario'] ?? "Sin asignar"}',
+                            style: TextStyle(fontSize: 13, color: Colors.blueGrey.shade700),
+                          ),
+                          Text(
+                            '${pagado.toStringAsFixed(2)} € / ${totalAPagar.toStringAsFixed(2)} €',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: estaPagado ? Colors.green.shade800 : Colors.black87,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: LinearProgressIndicator(
+                          value: porcentaje,
+                          backgroundColor: Colors.grey.shade200,
+                          color: estaPagado ? Colors.green.shade600 : Colors.orange.shade600,
+                          minHeight: 8,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: estaPagado ? Colors.green.shade800 : const Color(0xFF1F4E79),
+                            side: BorderSide(color: estaPagado ? Colors.green : const Color(0xFF1F4E79)),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                          icon: Icon(estaPagado ? Icons.check_circle : Icons.payment, size: 18),
+                          label: Text(estaPagado ? 'Liquidado Totalmente (Cobrar más)' : 'Registrar Cobro'),
+                          onPressed: () => _mostrarDialogoCobro(context, id, data['nombre'] ?? '', pagado, totalAPagar),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _itemEstadistica(String titulo, String valor, Color color) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(titulo, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+        const SizedBox(height: 2),
+        Text(valor, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color)),
+      ],
     );
   }
 
@@ -544,7 +762,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             onPressed: () async {
               if (nombreController.text.trim().isNotEmpty && equipoController.text.trim().isNotEmpty) {
-                await FirebaseFirestore.instance.collection('vendedores').add({
+                final nuevo = {
+                  'id': 'jugador_${DateTime.now().microsecondsSinceEpoch}',
                   'nombre': nombreController.text.trim(),
                   'equipo': equipoController.text.trim(),
                   'esPagoBeneficio': false,
@@ -552,8 +771,15 @@ class _HomeScreenState extends State<HomeScreen> {
                   'papeletas': 0,
                   'totalAPagar': 0.0,
                   'pagado': 0.0,
-                  'creadoEn': FieldValue.serverTimestamp(),
-                });
+                  'notas': '',
+                };
+                if (gFirebaseConectado) {
+                  await FirebaseFirestore.instance.collection('vendedores').add(nuevo);
+                } else {
+                  _jugadoresLocales.add(nuevo);
+                  _guardarDatosLocales();
+                  setState(() {});
+                }
                 Navigator.pop(ctx);
               }
             },
@@ -649,12 +875,24 @@ class _HomeScreenState extends State<HomeScreen> {
                     totalAPagar = valorPapeletas;
                   }
                 }
-                await FirebaseFirestore.instance.collection('vendedores').doc(jugadorId).update({
-                  'esPagoBeneficio': esPagoBeneficio,
-                  'talonario': esPagoBeneficio ? null : talonarioController.text.trim(),
-                  'papeletas': papeletas,
-                  'totalAPagar': totalAPagar,
-                });
+                if (gFirebaseConectado) {
+                  await FirebaseFirestore.instance.collection('vendedores').doc(jugadorId).update({
+                    'esPagoBeneficio': esPagoBeneficio,
+                    'talonario': esPagoBeneficio ? null : talonarioController.text.trim(),
+                    'papeletas': papeletas,
+                    'totalAPagar': totalAPagar,
+                  });
+                } else {
+                  final idx = _jugadoresLocales.indexWhere((j) => j['id'] == jugadorId);
+                  if (idx != -1) {
+                    _jugadoresLocales[idx]['esPagoBeneficio'] = esPagoBeneficio;
+                    _jugadoresLocales[idx]['talonario'] = esPagoBeneficio ? null : talonarioController.text.trim();
+                    _jugadoresLocales[idx]['papeletas'] = papeletas;
+                    _jugadoresLocales[idx]['totalAPagar'] = totalAPagar;
+                    _guardarDatosLocales();
+                    setState(() {});
+                  }
+                }
                 Navigator.pop(ctx);
               },
               child: const Text('Guardar'),
@@ -725,9 +963,18 @@ class _HomeScreenState extends State<HomeScreen> {
               if (ingreso > 0) {
                 double nuevoPagado = pagadoActual + ingreso;
                 if (nuevoPagado <= totalAPagar + 0.001) {
-                  await FirebaseFirestore.instance.collection('vendedores').doc(jugadorId).update({
-                    'pagado': nuevoPagado,
-                  });
+                  if (gFirebaseConectado) {
+                    await FirebaseFirestore.instance.collection('vendedores').doc(jugadorId).update({
+                      'pagado': nuevoPagado,
+                    });
+                  } else {
+                    final idx = _jugadoresLocales.indexWhere((j) => j['id'] == jugadorId);
+                    if (idx != -1) {
+                      _jugadoresLocales[idx]['pagado'] = nuevoPagado;
+                      _guardarDatosLocales();
+                      setState(() {});
+                    }
+                  }
                   Navigator.pop(ctx);
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -781,7 +1028,16 @@ class _HomeScreenState extends State<HomeScreen> {
           if (notasActuales.isNotEmpty)
             TextButton(
               onPressed: () async {
-                await FirebaseFirestore.instance.collection('vendedores').doc(jugadorId).update({'notas': ''});
+                if (gFirebaseConectado) {
+                  await FirebaseFirestore.instance.collection('vendedores').doc(jugadorId).update({'notas': ''});
+                } else {
+                  final idx = _jugadoresLocales.indexWhere((j) => j['id'] == jugadorId);
+                  if (idx != -1) {
+                    _jugadoresLocales[idx]['notas'] = '';
+                    _guardarDatosLocales();
+                    setState(() {});
+                  }
+                }
                 if (mounted) Navigator.pop(ctx);
               },
               child: const Text('Borrar Nota', style: TextStyle(color: Colors.red)),
@@ -793,12 +1049,48 @@ class _HomeScreenState extends State<HomeScreen> {
               foregroundColor: Colors.white,
             ),
             onPressed: () async {
-              await FirebaseFirestore.instance.collection('vendedores').doc(jugadorId).update({
-                'notas': notasController.text.trim(),
-              });
+              if (gFirebaseConectado) {
+                await FirebaseFirestore.instance.collection('vendedores').doc(jugadorId).update({
+                  'notas': notasController.text.trim(),
+                });
+              } else {
+                final idx = _jugadoresLocales.indexWhere((j) => j['id'] == jugadorId);
+                if (idx != -1) {
+                  _jugadoresLocales[idx]['notas'] = notasController.text.trim();
+                  _guardarDatosLocales();
+                  setState(() {});
+                }
+              }
               if (mounted) Navigator.pop(ctx);
             },
             child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmarEliminarJugador(BuildContext context, String jugadorId, String nombreJugador) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirmar eliminación'),
+        content: Text('¿Seguro que deseas eliminar a $nombreJugador de la lista?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () async {
+              if (gFirebaseConectado) {
+                await FirebaseFirestore.instance.collection('vendedores').doc(jugadorId).delete();
+              } else {
+                _jugadoresLocales.removeWhere((j) => j['id'] == jugadorId);
+                _guardarDatosLocales();
+                setState(() {});
+              }
+              if (mounted) Navigator.pop(ctx);
+            },
+            child: const Text('Eliminar'),
           ),
         ],
       ),
