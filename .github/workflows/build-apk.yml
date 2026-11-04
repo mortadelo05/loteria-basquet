@@ -55,21 +55,46 @@ jobs:
           echo "android.useAndroidX=true" >> android/gradle.properties
           echo "android.enableJetifier=true" >> android/gradle.properties
 
-          # 3. Sustitución universal de minSdk a 23 en archivos gradle
-          if [ -f "android/app/build.gradle.kts" ]; then
-            sed -i -E 's/minSdk(Version)?[ 	]*(=|[ 	]).*/minSdk = 23/g' android/app/build.gradle.kts
-          fi
-          if [ -f "android/app/build.gradle" ]; then
-            sed -i -E 's/minSdk(Version)?[ 	]*(=|[ 	]).*/minSdkVersion 23/g' android/app/build.gradle
-          fi
+          # 3. Configuración definitiva de minSdk 23, permisos y tools:overrideLibrary
+          python3 -c "import textwrap, sys; exec(textwrap.dedent(sys.stdin.read()))" << 'PYEOF'
+          import os, re
 
-          # 4. Inyectar tools:overrideLibrary y permisos en AndroidManifest.xml
-          if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
-            grep -q 'xmlns:tools' android/app/src/main/AndroidManifest.xml || sed -i 's/<manifest /<manifest xmlns:tools="http://schemas.android.com/tools" /g' android/app/src/main/AndroidManifest.xml
-            grep -q 'overrideLibrary' android/app/src/main/AndroidManifest.xml || sed -i '/<application/i     <uses-sdk tools:overrideLibrary="com.google.firebase.auth, io.flutter.plugins.firebase.auth, com.google.firebase" />' android/app/src/main/AndroidManifest.xml
-            grep -q 'android.permission.INTERNET' android/app/src/main/AndroidManifest.xml || sed -i '/<application/i     <uses-permission android:name="android.permission.INTERNET" />' android/app/src/main/AndroidManifest.xml
-            grep -q 'android.permission.READ_EXTERNAL_STORAGE' android/app/src/main/AndroidManifest.xml || sed -i '/<application/i     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />' android/app/src/main/AndroidManifest.xml
-          fi
+          # Actualizar AndroidManifest.xml
+          manifest = "android/app/src/main/AndroidManifest.xml"
+          if os.path.exists(manifest):
+              with open(manifest, "r", encoding="utf-8") as f:
+                  m = f.read()
+              if 'xmlns:tools' not in m:
+                  m = m.replace('<manifest ', '<manifest xmlns:tools="http://schemas.android.com/tools" ')
+              inserts = []
+              if 'overrideLibrary' not in m:
+                  inserts.append('    <uses-sdk tools:overrideLibrary="com.google.firebase.auth, io.flutter.plugins.firebase.auth, com.google.firebase, io.flutter.plugins.firebase.core, io.flutter.plugins.firebase.firestore" />')
+              if 'android.permission.INTERNET' not in m:
+                  inserts.append('    <uses-permission android:name="android.permission.INTERNET" />')
+              if 'android.permission.READ_EXTERNAL_STORAGE' not in m:
+                  inserts.append('    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />')
+              if 'android.permission.WRITE_EXTERNAL_STORAGE' not in m:
+                  inserts.append('    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />')
+              if inserts and '<application' in m:
+                  m = m.replace('<application', '\n'.join(inserts) + '\n    <application', 1)
+              with open(manifest, "w", encoding="utf-8") as f:
+                  f.write(m)
+              print("✅ AndroidManifest.xml blindado con éxito.")
+
+          # Forzar minSdk 23 en archivos gradle
+          for path in ["android/app/build.gradle", "android/app/build.gradle.kts"]:
+              if os.path.exists(path):
+                  with open(path, "r", encoding="utf-8") as f:
+                      g = f.read()
+                  if path.endswith(".kts"):
+                      g = re.sub(r'minSdk\s*=.*', 'minSdk = 23', g)
+                  else:
+                      g = re.sub(r'minSdkVersion\s+.*', 'minSdkVersion 23', g)
+                      g = re.sub(r'minSdk\s*=.*', 'minSdk = 23', g)
+                  with open(path, "w", encoding="utf-8") as f:
+                      f.write(g)
+                  print(f"✅ {path} actualizado a minSdk 23.")
+          PYEOF
 
       - name: Descargar dependencias
         run: |
@@ -77,12 +102,20 @@ jobs:
           flutter pub get
           # Reasegurar minSdk = 23 tras pub get
           echo "flutter.minSdkVersion=23" >> android/local.properties
-          if [ -f "android/app/build.gradle.kts" ]; then
-            sed -i -E 's/minSdk(Version)?[ 	]*(=|[ 	]).*/minSdk = 23/g' android/app/build.gradle.kts
-          fi
-          if [ -f "android/app/build.gradle" ]; then
-            sed -i -E 's/minSdk(Version)?[ 	]*(=|[ 	]).*/minSdkVersion 23/g' android/app/build.gradle
-          fi
+          python3 -c "import textwrap, sys; exec(textwrap.dedent(sys.stdin.read()))" << 'PYEOF'
+          import os, re
+          for path in ["android/app/build.gradle", "android/app/build.gradle.kts"]:
+              if os.path.exists(path):
+                  with open(path, "r", encoding="utf-8") as f:
+                      g = f.read()
+                  if path.endswith(".kts"):
+                      g = re.sub(r'minSdk\s*=.*', 'minSdk = 23', g)
+                  else:
+                      g = re.sub(r'minSdkVersion\s+.*', 'minSdkVersion 23', g)
+                      g = re.sub(r'minSdk\s*=.*', 'minSdk = 23', g)
+                  with open(path, "w", encoding="utf-8") as f:
+                      f.write(g)
+          PYEOF
 
       - name: Validar sintaxis y tipos Dart
         run: |
@@ -107,4 +140,3 @@ jobs:
           path: build/app/outputs/flutter-apk/*.apk
           if-no-files-found: error
           retention-days: 7
-
