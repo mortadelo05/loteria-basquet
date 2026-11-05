@@ -105,33 +105,182 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // PIN de tesorería (por defecto 1234, persistente y editable desde la app)
   String _pinMaestro = '1234';
   bool _sesionTesoreriaActiva = false;
   String _filtroEquipo = 'Todos';
+  String _busquedaTexto = '';
+  final TextEditingController _busquedaController = TextEditingController();
+  String _filtroPago = 'Todos';
+  String _filtroEntrega = 'Todas';
+  String _filtroModalidad = 'Todas';
+  String _ordenLista = 'Correlativo';
+  bool _mostrarPanelCribado = false;
 
   // Almacén de jugadores local para cuando no haya Firebase
   List<Map<String, dynamic>> _jugadoresLocales = [];
   List<Map<String, dynamic>> _ultimosDocsFirestore = [];
   bool _cargandoDatos = true;
+  bool _datosInicializados = false;
 
   List<Map<String, dynamic>> _obtenerDocsActuales() {
     return gFirebaseConectado ? _ultimosDocsFirestore : _jugadoresLocales;
   }
 
+  int get _filtrosCribadoActivos {
+    int count = 0;
+    if (_filtroPago != 'Todos') count++;
+    if (_filtroEntrega != 'Todas') count++;
+    if (_filtroModalidad != 'Todas') count++;
+    if (_ordenLista != 'Correlativo') count++;
+    return count;
+  }
+
+  bool get _hayAlgunFiltroActivo =>
+      _filtroEquipo != 'Todos' ||
+      _busquedaTexto.trim().isNotEmpty ||
+      _filtrosCribadoActivos > 0;
+
+  void _limpiarFiltrosCribado() {
+    setState(() {
+      _filtroEquipo = 'Todos';
+      _busquedaTexto = '';
+      _busquedaController.clear();
+      _filtroPago = 'Todos';
+      _filtroEntrega = 'Todas';
+      _filtroModalidad = 'Todas';
+      _ordenLista = 'Correlativo';
+    });
+  }
+
+  Widget _filaChipsCribado(
+    String titulo,
+    List<String> opciones,
+    String valorActual,
+    ValueChanged<String> onSelect,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            titulo.toUpperCase(),
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.5,
+              color: Colors.blueGrey.shade700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: opciones.map((op) {
+                final bool seleccionado = valorActual == op;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 6.0),
+                  child: ChoiceChip(
+                    selected: seleccionado,
+                    label: Text(op),
+                    visualDensity: VisualDensity.compact,
+                    selectedColor: const Color(0xFF1F4E79),
+                    backgroundColor: Colors.white,
+                    side: BorderSide(
+                      color: seleccionado ? const Color(0xFF1F4E79) : Colors.blueGrey.shade200,
+                    ),
+                    labelStyle: TextStyle(
+                      fontSize: 11,
+                      fontWeight: seleccionado ? FontWeight.bold : FontWeight.w500,
+                      color: seleccionado ? Colors.white : Colors.blueGrey.shade800,
+                    ),
+                    onSelected: (_) => setState(() => onSelect(op)),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _inicializarDatos();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _busquedaController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      if (!gFirebaseConectado && _datosInicializados) {
+        _guardarDatosLocales();
+      }
+    }
+  }
+
+  List<Directory> _obtenerDirectoriosPersistentes() {
+    final List<Directory> dirs = [];
+    final Set<String> vistos = {};
+
+    void agregarSiValido(String ruta) {
+      if (ruta.isEmpty || vistos.contains(ruta)) return;
+      vistos.add(ruta);
+      dirs.add(Directory(ruta));
+    }
+
+    // 1. En Android, Directory.systemTemp apunta a /data/user/<userId>/<packageName>/cache.
+    //    Su directorio padre contiene 'files' y 'app_flutter' (almacenamiento interno permanente).
+    try {
+      final parentPath = Directory.systemTemp.parent.path;
+      if (parentPath.isNotEmpty && parentPath != '/') {
+        agregarSiValido('$parentPath/files');
+        agregarSiValido('$parentPath/app_flutter');
+      }
+    } catch (_) {}
+
+    // 2. Detectar el ID real del paquete Android desde /proc/self/cmdline
+    try {
+      final cmdFile = File('/proc/self/cmdline');
+      if (cmdFile.existsSync()) {
+        final rawBytes = cmdFile.readAsBytesSync();
+        final zeroIdx = rawBytes.indexOf(0);
+        final pkgBytes = zeroIdx == -1 ? rawBytes : rawBytes.sublist(0, zeroIdx);
+        final pkg = utf8.decode(pkgBytes, allowMalformed: true).trim();
+        if (pkg.isNotEmpty && !pkg.contains('/')) {
+          agregarSiValido('/data/user/0/$pkg/files');
+          agregarSiValido('/data/data/$pkg/files');
+        }
+      }
+    } catch (_) {}
+
+    // 3. Rutas explícitas de respaldo por compatibilidad
+    agregarSiValido('/data/user/0/com.clubbasket.loteria.basket_app/files');
+    agregarSiValido('/data/user/0/com.clubbasket.loteria/files');
+    agregarSiValido(Directory.systemTemp.path);
+
+    return dirs;
   }
 
   Future<void> _inicializarDatos() async {
     _cargarPinLocal();
     if (!gFirebaseConectado) {
-      _cargarDatosLocales();
-      // Si la lista está vacía, añadimos 2 jugadores iniciales de muestra del club
-      if (_jugadoresLocales.isEmpty) {
+      final bool archivoExistente = _cargarDatosLocales();
+      // Solo añadimos los 2 jugadores iniciales la primera vez que se abre la app (cuando aún no existe archivo guardado)
+      if (!archivoExistente) {
         _jugadoresLocales = [
           {
             'id': '1',
@@ -161,68 +310,114 @@ class _HomeScreenState extends State<HomeScreen> {
         _guardarDatosLocales();
       }
     }
-    setState(() => _cargandoDatos = false);
+    _datosInicializados = true;
+    if (mounted) {
+      setState(() => _cargandoDatos = false);
+    }
   }
 
   void _cargarPinLocal() {
-    try {
-      final file = File('/data/user/0/com.clubbasket.loteria/files/loteria_pin.txt');
-      if (file.existsSync()) {
-        final p = file.readAsStringSync().trim();
-        if (p.length == 4) _pinMaestro = p;
-      }
-    } catch (_) {
+    for (final dir in _obtenerDirectoriosPersistentes()) {
       try {
-        final dir = Directory.systemTemp;
-        final f = File('${dir.path}/loteria_pin.txt');
-        if (f.existsSync()) {
-          final p = f.readAsStringSync().trim();
-          if (p.length == 4) _pinMaestro = p;
+        final file = File('${dir.path}/loteria_pin.txt');
+        if (file.existsSync()) {
+          final p = file.readAsStringSync().trim();
+          if (p.length == 4) {
+            _pinMaestro = p;
+            return;
+          }
         }
       } catch (_) {}
     }
   }
 
-  void _guardarPinLocal(String nuevoPin) {
+  bool _guardarPinLocal(String nuevoPin) {
     _pinMaestro = nuevoPin;
-    try {
-      final file = File('/data/user/0/com.clubbasket.loteria/files/loteria_pin.txt');
-      if (!file.parent.existsSync()) {
-        file.parent.createSync(recursive: true);
-      }
-      file.writeAsStringSync(nuevoPin);
-    } catch (_) {
+    for (final dir in _obtenerDirectoriosPersistentes()) {
       try {
-        final dir = Directory.systemTemp;
-        File('${dir.path}/loteria_pin.txt').writeAsStringSync(nuevoPin);
+        if (!dir.existsSync()) {
+          dir.createSync(recursive: true);
+        }
+        final file = File('${dir.path}/loteria_pin.txt');
+        file.writeAsStringSync(nuevoPin, flush: true);
+        if (file.existsSync()) {
+          return true;
+        }
       } catch (_) {}
+    }
+    return false;
+  }
+
+  bool _guardarDatosLocales() {
+    final String jsonPayload = jsonEncode(_jugadoresLocales);
+    for (final dir in _obtenerDirectoriosPersistentes()) {
+      try {
+        if (!dir.existsSync()) {
+          dir.createSync(recursive: true);
+        }
+        final String targetPath = '${dir.path}/loteria_datos.json';
+        final File tempFile = File('$targetPath.tmp');
+        tempFile.writeAsStringSync(jsonPayload, flush: true);
+        try {
+          tempFile.renameSync(targetPath);
+        } catch (_) {
+          File(targetPath).writeAsStringSync(jsonPayload, flush: true);
+        }
+        if (File(targetPath).existsSync()) {
+          return true;
+        }
+      } catch (_) {}
+    }
+    return false;
+  }
+
+  void _guardarManualmenteConConfirmacion(BuildContext context) {
+    if (gFirebaseConectado) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Datos sincronizados en la nube (${_ultimosDocsFirestore.length} jugadores)'),
+          backgroundColor: Colors.green.shade700,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    final bool okDatos = _guardarDatosLocales();
+    final bool okPin = _guardarPinLocal(_pinMaestro);
+
+    if (okDatos && okPin) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Cambios guardados en el móvil (${_jugadoresLocales.length} jugadores)'),
+          backgroundColor: Colors.green.shade700,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo escribir en la memoria del dispositivo'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 3),
+        ),
+      );
     }
   }
 
-  void _guardarDatosLocales() {
-    try {
-      final file = File('/data/user/0/com.clubbasket.loteria/files/loteria_datos.json');
-      if (!file.parent.existsSync()) {
-        file.parent.createSync(recursive: true);
-      }
-      file.writeAsStringSync(jsonEncode(_jugadoresLocales));
-    } catch (_) {
+  bool _cargarDatosLocales() {
+    for (final dir in _obtenerDirectoriosPersistentes()) {
       try {
-        final dir = Directory.systemTemp;
-        File('${dir.path}/loteria_datos.json').writeAsStringSync(jsonEncode(_jugadoresLocales));
+        final file = File('${dir.path}/loteria_datos.json');
+        if (file.existsSync()) {
+          final raw = file.readAsStringSync();
+          final List<dynamic> parsed = jsonDecode(raw);
+          _jugadoresLocales = parsed.map((e) => Map<String, dynamic>.from(e)).toList();
+          return true;
+        }
       } catch (_) {}
     }
-  }
-
-  void _cargarDatosLocales() {
-    try {
-      final file = File('/data/user/0/com.clubbasket.loteria/files/loteria_datos.json');
-      if (file.existsSync()) {
-        final raw = file.readAsStringSync();
-        final List<dynamic> parsed = jsonDecode(raw);
-        _jugadoresLocales = parsed.map((e) => Map<String, dynamic>.from(e)).toList();
-      }
-    } catch (_) {}
+    return false;
   }
 
   void _verificarPinYEjecutar(BuildContext context, VoidCallback accion) {
@@ -874,18 +1069,14 @@ class _HomeScreenState extends State<HomeScreen> {
         try {
           final f = File(rutaDescargas);
           if (!f.parent.existsSync()) f.parent.createSync(recursive: true);
-          f.writeAsBytesSync(bytes);
+          f.writeAsBytesSync(bytes, flush: true);
         } catch (_) {
-          try {
-            final fLocal = File('/data/user/0/com.clubbasket.loteria/files/$nombreArchivo');
-            if (!fLocal.parent.existsSync()) fLocal.parent.createSync(recursive: true);
-            fLocal.writeAsBytesSync(bytes);
-            rutaFinal = fLocal.path;
-          } catch (_) {
-            final fTemp = File('${Directory.systemTemp.path}/$nombreArchivo');
-            fTemp.writeAsBytesSync(bytes);
-            rutaFinal = fTemp.path;
-          }
+          final dirs = _obtenerDirectoriosPersistentes();
+          final fallbackDir = dirs.isNotEmpty ? dirs.first : Directory.systemTemp;
+          if (!fallbackDir.existsSync()) fallbackDir.createSync(recursive: true);
+          final fLocal = File('${fallbackDir.path}/$nombreArchivo');
+          fLocal.writeAsBytesSync(bytes, flush: true);
+          rutaFinal = fLocal.path;
         }
 
         if (context.mounted) {
@@ -950,18 +1141,14 @@ class _HomeScreenState extends State<HomeScreen> {
       try {
         final f = File(rutaDescargas);
         if (!f.parent.existsSync()) f.parent.createSync(recursive: true);
-        f.writeAsStringSync(sb.toString(), encoding: utf8);
+        f.writeAsStringSync(sb.toString(), encoding: utf8, flush: true);
       } catch (_) {
-        try {
-          final fLocal = File('/data/user/0/com.clubbasket.loteria/files/$nombreArchivo');
-          if (!fLocal.parent.existsSync()) fLocal.parent.createSync(recursive: true);
-          fLocal.writeAsStringSync(sb.toString(), encoding: utf8);
-          rutaFinal = fLocal.path;
-        } catch (_) {
-          final fTemp = File('${Directory.systemTemp.path}/$nombreArchivo');
-          fTemp.writeAsStringSync(sb.toString(), encoding: utf8);
-          rutaFinal = fTemp.path;
-        }
+        final dirs = _obtenerDirectoriosPersistentes();
+        final fallbackDir = dirs.isNotEmpty ? dirs.first : Directory.systemTemp;
+        if (!fallbackDir.existsSync()) fallbackDir.createSync(recursive: true);
+        final fLocal = File('${fallbackDir.path}/$nombreArchivo');
+        fLocal.writeAsStringSync(sb.toString(), encoding: utf8, flush: true);
+        rutaFinal = fLocal.path;
       }
 
       if (context.mounted) {
@@ -1198,6 +1385,11 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('Gestión Lotería Club Bàsquet', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
         actions: [
           IconButton(
+            icon: const Icon(Icons.save),
+            tooltip: 'Guardar cambios ahora',
+            onPressed: () => _guardarManualmenteConConfirmacion(context),
+          ),
+          IconButton(
             icon: const Icon(Icons.file_download),
             tooltip: 'Exportar Informe de Cobros',
             onPressed: () => _mostrarDialogoExportar(context, _obtenerDocsActuales()),
@@ -1254,12 +1446,27 @@ class _HomeScreenState extends State<HomeScreen> {
                   },
                 )
               : _construirCuerpoConLista(_jugadoresLocales),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: const Color(0xFF1F4E79),
-        foregroundColor: Colors.white,
-        onPressed: () => _verificarPinYEjecutar(context, () => _mostrarDialogoNuevoJugador(context)),
-        label: const Text('Nuevo Jugador'),
-        icon: const Icon(Icons.person_add),
+      floatingActionButton: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton.extended(
+            heroTag: 'fabGuardar',
+            backgroundColor: Colors.green.shade700,
+            foregroundColor: Colors.white,
+            onPressed: () => _guardarManualmenteConConfirmacion(context),
+            label: const Text('Guardar'),
+            icon: const Icon(Icons.save),
+          ),
+          const SizedBox(width: 10),
+          FloatingActionButton.extended(
+            heroTag: 'fabNuevoJugador',
+            backgroundColor: const Color(0xFF1F4E79),
+            foregroundColor: Colors.white,
+            onPressed: () => _verificarPinYEjecutar(context, () => _mostrarDialogoNuevoJugador(context)),
+            label: const Text('Nuevo Jugador'),
+            icon: const Icon(Icons.person_add),
+          ),
+        ],
       ),
     );
   }
@@ -1312,10 +1519,81 @@ class _HomeScreenState extends State<HomeScreen> {
     // Extraer lista única de equipos para pestañas/chips
     final equipos = {'Todos', ...docs.map((d) => (d['equipo'] ?? 'Sin equipo').toString().trim())}.toList();
 
-    // Filtrar por equipo
-    final docsFiltrados = _filtroEquipo == 'Todos'
-        ? docs
-        : docs.where((d) => (d['equipo'] ?? '').toString().trim() == _filtroEquipo).toList();
+    // Filtrar por equipo y parámetros de cribado combinables
+    final String query = _busquedaTexto.toLowerCase().trim();
+    final List<Map<String, dynamic>> docsFiltrados = docs.where((d) {
+      if (_filtroEquipo != 'Todos' && (d['equipo'] ?? '').toString().trim() != _filtroEquipo) {
+        return false;
+      }
+
+      final double pagado = (d['pagado'] is num) ? (d['pagado'] as num).toDouble() : 0.0;
+      final double total = (d['totalAPagar'] is num) ? (d['totalAPagar'] as num).toDouble() : 0.0;
+      final bool estaPagado = pagado >= total && total > 0;
+      final double deuda = (total - pagado).clamp(0.0, double.infinity);
+
+      if (_filtroPago == 'Con deuda' && deuda <= 0.001) return false;
+      if (_filtroPago == 'Sin pagar' && !(pagado <= 0.001 && total > 0)) return false;
+      if (_filtroPago == 'Pago parcial' && !(pagado > 0.001 && !estaPagado)) return false;
+      if (_filtroPago == 'Al día' && !estaPagado) return false;
+
+      final bool entregado = (d['papeletasEntregadas'] is bool) ? (d['papeletasEntregadas'] as bool) : false;
+      if (_filtroEntrega == 'Entregadas' && !entregado) return false;
+      if (_filtroEntrega == 'Sin entregar' && entregado) return false;
+
+      final bool esBeneficio = (d['esPagoBeneficio'] is bool) ? (d['esPagoBeneficio'] as bool) : false;
+      final int paps = (d['papeletas'] is num) ? (d['papeletas'] as num).toInt() : 0;
+      final String notas = (d['notas'] ?? '').toString().trim();
+
+      if (_filtroModalidad == 'Papeletas 5€' && (esBeneficio || paps <= 0)) return false;
+      if (_filtroModalidad == 'Beneficio 20€' && !esBeneficio) return false;
+      if (_filtroModalidad == 'Sin asignar' && (esBeneficio || paps > 0)) return false;
+      if (_filtroModalidad == 'Con notas' && notas.isEmpty) return false;
+
+      if (query.isNotEmpty) {
+        final String nombre = (d['nombre'] ?? '').toString().toLowerCase();
+        final String equipo = (d['equipo'] ?? '').toString().toLowerCase();
+        final String talonario = (d['talonario'] ?? '').toString().toLowerCase();
+        final String notasLower = notas.toLowerCase();
+        if (!nombre.contains(query) &&
+            !equipo.contains(query) &&
+            !talonario.contains(query) &&
+            !notasLower.contains(query)) {
+          return false;
+        }
+      }
+
+      return true;
+    }).toList();
+
+    if (_ordenLista == 'Nombre A-Z') {
+      docsFiltrados.sort(
+        (a, b) => (a['nombre'] ?? '').toString().toLowerCase().compareTo((b['nombre'] ?? '').toString().toLowerCase()),
+      );
+    } else if (_ordenLista == 'Mayor deuda') {
+      docsFiltrados.sort((a, b) {
+        final double pagA = (a['pagado'] is num) ? (a['pagado'] as num).toDouble() : 0.0;
+        final double totA = (a['totalAPagar'] is num) ? (a['totalAPagar'] as num).toDouble() : 0.0;
+        final double deudaA = (totA - pagA).clamp(0.0, double.infinity);
+
+        final double pagB = (b['pagado'] is num) ? (b['pagado'] as num).toDouble() : 0.0;
+        final double totB = (b['totalAPagar'] is num) ? (b['totalAPagar'] as num).toDouble() : 0.0;
+        final double deudaB = (totB - pagB).clamp(0.0, double.infinity);
+        return deudaB.compareTo(deudaA);
+      });
+    } else if (_ordenLista == 'Mayor pago') {
+      docsFiltrados.sort((a, b) {
+        final double pagA = (a['pagado'] is num) ? (a['pagado'] as num).toDouble() : 0.0;
+        final double pagB = (b['pagado'] is num) ? (b['pagado'] as num).toDouble() : 0.0;
+        return pagB.compareTo(pagA);
+      });
+    }
+
+    double pendienteFiltrado = 0.0;
+    for (var d in docsFiltrados) {
+      final double pag = (d['pagado'] is num) ? (d['pagado'] as num).toDouble() : 0.0;
+      final double tot = (d['totalAPagar'] is num) ? (d['totalAPagar'] as num).toDouble() : 0.0;
+      pendienteFiltrado += (tot - pag).clamp(0.0, double.infinity);
+    }
 
     return Column(
       children: [
@@ -1433,9 +1711,190 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
 
+        // Barra de búsqueda rápida y botón desplegable de cribado por parámetros
+        Container(
+          color: const Color(0xFFF8FAFC),
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 38,
+                  child: TextField(
+                    controller: _busquedaController,
+                    onChanged: (val) => setState(() => _busquedaTexto = val),
+                    style: const TextStyle(fontSize: 13),
+                    decoration: InputDecoration(
+                      hintText: 'Buscar jugador, talonario o nota...',
+                      hintStyle: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                      prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF1F4E79)),
+                      suffixIcon: _busquedaTexto.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.close, size: 16),
+                              padding: EdgeInsets.zero,
+                              onPressed: () {
+                                _busquedaController.clear();
+                                setState(() => _busquedaTexto = '');
+                              },
+                            )
+                          : null,
+                      filled: true,
+                      fillColor: Colors.white,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: Colors.blueGrey.shade200),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: Colors.blueGrey.shade200),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: _mostrarPanelCribado || _filtrosCribadoActivos > 0
+                      ? const Color(0xFF1F4E79)
+                      : Colors.white,
+                  foregroundColor: _mostrarPanelCribado || _filtrosCribadoActivos > 0
+                      ? Colors.white
+                      : const Color(0xFF1F4E79),
+                  side: const BorderSide(color: Color(0xFF1F4E79)),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                icon: const Icon(Icons.tune, size: 16),
+                label: Text(
+                  _filtrosCribadoActivos > 0 ? 'Cribado ($_filtrosCribadoActivos)' : 'Cribado',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                onPressed: () => setState(() => _mostrarPanelCribado = !_mostrarPanelCribado),
+              ),
+            ],
+          ),
+        ),
+
+        // Panel desplegable de filtros combinables (Cobro, Entrega, Modalidad y Orden)
+        if (_mostrarPanelCribado)
+          Container(
+            width: double.infinity,
+            color: const Color(0xFFF1F5F9),
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _filaChipsCribado(
+                  'Estado de Cobro',
+                  ['Todos', 'Con deuda', 'Sin pagar', 'Pago parcial', 'Al día'],
+                  _filtroPago,
+                  (v) => _filtroPago = v,
+                ),
+                _filaChipsCribado(
+                  'Entrega Física de Papeletas',
+                  ['Todas', 'Entregadas', 'Sin entregar'],
+                  _filtroEntrega,
+                  (v) => _filtroEntrega = v,
+                ),
+                _filaChipsCribado(
+                  'Modalidad y Observaciones',
+                  ['Todas', 'Papeletas 5€', 'Beneficio 20€', 'Sin asignar', 'Con notas'],
+                  _filtroModalidad,
+                  (v) => _filtroModalidad = v,
+                ),
+                _filaChipsCribado(
+                  'Ordenar Listado Por',
+                  ['Correlativo', 'Nombre A-Z', 'Mayor deuda', 'Mayor pago'],
+                  _ordenLista,
+                  (v) => _ordenLista = v,
+                ),
+              ],
+            ),
+          ),
+
+        // Barra resumen de resultados filtrados + botón rápido para limpiar filtros
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border(
+              top: BorderSide(color: Colors.grey.shade200),
+              bottom: BorderSide(color: Colors.grey.shade200),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  'Mostrando ${docsFiltrados.length} de ${docs.length} • Pendiente: ${pendienteFiltrado.toStringAsFixed(0)} €',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.blueGrey.shade700,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (_hayAlgunFiltroActivo)
+                InkWell(
+                  onTap: _limpiarFiltrosCribado,
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    child: Text(
+                      'Limpiar filtros',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFFE65100),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+
         // Lista de tarjetas de jugadores con numeración correlativa y testigo de entrega
         Expanded(
-          child: ListView.builder(
+          child: docsFiltrados.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.filter_alt_off, size: 52, color: Colors.blueGrey.shade300),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Ningún jugador coincide con el cribado',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Prueba a cambiar los filtros de cobro, entrega, modalidad o búsqueda.',
+                          style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 14),
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF1F4E79),
+                            foregroundColor: Colors.white,
+                          ),
+                          icon: const Icon(Icons.refresh, size: 18),
+                          label: const Text('Restablecer filtros'),
+                          onPressed: _limpiarFiltrosCribado,
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : ListView.builder(
             itemCount: docsFiltrados.length,
             padding: const EdgeInsets.only(bottom: 80, top: 8),
             itemBuilder: (context, index) {
